@@ -21,7 +21,7 @@ enum type {
 struct record {
 	uint32_t ttl;
 	uint16_t len;
-	char payload[4];
+	char payload[0];
 } __packed;
 
 int find_record(enum type type, void* buf, size_t sze, struct iovec* value);

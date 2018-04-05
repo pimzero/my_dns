@@ -49,7 +49,7 @@ struct dns_ans {
 	uint16_t name;
 	uint16_t type;
 	uint16_t class;
-	struct record val;
+	struct record val[0];
 } __packed;
 
 static int fd_tcp, fd_udp;
@@ -86,6 +86,19 @@ static int epoll_add(int epollfd, int fd, int events) {
 
 typedef int (*send_fn)(struct msghdr* msg, uint16_t sze, void* data);
 
+int find_record(enum type type, void* buf, size_t sze, struct iovec* iov) {
+	static char space[24];
+	struct record* r = (void*)space;
+
+	r->ttl = 0;
+	r->len = htons(4);
+	*(int*)r->payload = 0xaa55aa55;
+
+	*iov = IOV(r, sizeof(*r) + 4);
+
+	return 0;
+}
+
 static int handle_QUERY(struct dns_req* rq, size_t sze, struct msghdr* msg,
 			send_fn cb, void* data) {
 	char* q = rq->payload;
@@ -107,11 +120,8 @@ static int handle_QUERY(struct dns_req* rq, size_t sze, struct msghdr* msg,
 					  2 * sizeof(uint16_t)));
 	ans.type = htons(type);
 	ans.class = htons(class);
-	ans.val.ttl = 0;
-	ans.val.len = htons(4);
-
-	*(int*)ans.val.payload = 0xaa55aa55;
 	BACK(msg) = IOV(&ans, sizeof(ans));
+	find_record(type, rq->payload, q - rq->payload, &BACK(msg));
 
 	return cb(msg, sze + sizeof(ans), data);
 }
