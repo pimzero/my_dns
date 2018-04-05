@@ -9,16 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 
-enum type {
-	type_A = 1,
-	type_NS = 2,
-	type_CNAME = 5,
-	type_SOA = 6,
-	type_PTR = 12,
-	type_MX = 15,
-	type_TXT = 16,
-	type_AAAA = 28,
-};
+#include "dns.h"
 
 enum opcode {
 	opcode_QUERY = 0,
@@ -32,7 +23,10 @@ enum opcode {
 #define xstr(s) str(s)
 #define str(s) #s
 #define LOG(...) printf(__FILE__ ":" xstr(__LINE__) " " __VA_ARGS__)
-#define __packed __attribute__((packed))
+
+#define IOV(Buf, Sze) (struct iovec){ .iov_base = Buf, .iov_len = Sze }
+#define FRONT(Msg) ((--(Msg)->msg_iov)[(Msg)->msg_iovlen++,0])
+#define BACK(Msg) ((Msg)->msg_iov[(Msg)->msg_iovlen++])
 
 struct dns_req {
 	uint16_t id;
@@ -49,12 +43,6 @@ struct dns_req {
 	uint16_t nscount;
 	uint16_t arcount;
 	char payload[0];
-} __packed;
-
-struct record {
-	uint32_t ttl;
-	uint16_t len;
-	char* payload[0];
 } __packed;
 
 struct dns_ans {
@@ -96,9 +84,10 @@ static int epoll_add(int epollfd, int fd, int events) {
 	return epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev);
 }
 
-typedef int (*send_fn)(void* msg, size_t len, void* data);
+typedef int (*send_fn)(struct msghdr* msg, uint16_t sze, void* data);
 
-static int handle_QUERY(struct dns_req* rq, size_t sze, send_fn cb, void* data) {
+static int handle_QUERY(struct dns_req* rq, size_t sze, struct msghdr* msg,
+			send_fn cb, void* data) {
 	char* q = rq->payload;
 	while (*q) {
 		q += (unsigned int)*q + 1;
@@ -107,27 +96,30 @@ static int handle_QUERY(struct dns_req* rq, size_t sze, send_fn cb, void* data) 
 	uint16_t type = ntohs(*(uint16_t*)q);
 	uint16_t class = ntohs(((uint16_t*)q)[1]);
 
-	struct dns_ans* ans = (void*)(((char*)rq) + sze);
+	struct dns_ans ans;
 
 	rq->qr = 1;
 	rq->aa = 1;
 	rq->qdcount = ntohs(1);
 	rq->ancount = ntohs(1);
 
-	ans->name = htons(0xc000 + sze - (sizeof(struct dns_req) +
+	ans.name = htons(0xc000 + sze - (sizeof(struct dns_req) +
 					  2 * sizeof(uint16_t)));
-	ans->type = htons(type);
-	ans->class = htons(class);
-	ans->val.ttl = 0;
-	ans->val.len = htons(4);
-	*(int*)ans->val.payload = 0xaa55aa55;
+	ans.type = htons(type);
+	ans.class = htons(class);
+	ans.val.ttl = 0;
+	ans.val.len = htons(4);
 
-	return cb(rq, sze + sizeof(struct dns_ans) + ntohs(ans->val.len), data);
+	*(int*)ans.val.payload = 0xaa55aa55;
+	BACK(msg) = IOV(&ans, sizeof(ans));
+
+	return cb(msg, sze + sizeof(ans), data);
 }
 
-static int handle_msg(struct dns_req* rq, size_t sze, send_fn cb,
-		      void* data) {
-	int (*opcode_handler[])(struct dns_req*, size_t, send_fn, void*) = {
+static int handle_msg(struct dns_req* rq, size_t sze, struct msghdr* hdr,
+		      send_fn cb, void* data) {
+	int (*opcode_handler[])(struct dns_req*, size_t, struct msghdr*,
+				send_fn, void*) = {
 #define X(I) [opcode_##I] = handle_##I
 		X(QUERY),
 #undef X
@@ -135,7 +127,7 @@ static int handle_msg(struct dns_req* rq, size_t sze, send_fn cb,
 
 	if (rq->op >= arrsze(opcode_handler) || !opcode_handler[rq->op])
 		return -1;
-	return opcode_handler[rq->op](rq, sze, cb, data);
+	return opcode_handler[rq->op](rq, sze, hdr, cb, data);
 }
 
 struct data_udp {
@@ -144,23 +136,35 @@ struct data_udp {
 	int fd;
 };
 
-static int reply_udp(void* msg, size_t sze, void* data) {
+static int reply_udp(struct msghdr* msg, uint16_t sze, void* data) {
+	(void)sze;
+
 	struct data_udp* d = data;
-	return sendto(d->fd, msg, sze, 0, &d->saddr, d->saddrlen);
+	msg->msg_name = &d->saddr;
+	msg->msg_namelen = d->saddrlen;
+
+	return sendmsg(d->fd, msg, 0);
 }
 
-static int reply_tcp(void* msg, size_t sze, void* data) {
+static int reply_tcp(struct msghdr* msg, uint16_t len, void* data) {
 	int fd = *(int*)data;
 
-	memmove(msg + 2, msg, sze);
-	*(uint16_t*)msg = htons(sze);
+	len = htons(len);
 
-	int out = send(fd, msg, sze + 2, MSG_DONTWAIT);
+	FRONT(msg) = IOV(&len, sizeof(len));
+
+	int out = sendmsg(fd, msg, 0);
 	close(fd);
 	return out;
 }
 
 static void dns_loop(int efd) {
+	struct iovec iov[8];
+	struct msghdr msg = {
+		.msg_iov = iov + 1, // We may prepend the size with tcp
+		.msg_iovlen = 0,
+	};
+
 	struct epoll_event ev[16];
 	char buf[1024];
 	char* ptr = buf;
@@ -196,8 +200,10 @@ static void dns_loop(int efd) {
 			data.fd = ev[i].data.fd;
 			fn = reply_tcp;
 		}
+		BACK(&msg) = IOV(ptr, sze);
 
-		chk_warn(handle_msg((void*)ptr, sze, fn, &data) < 0, "handle_msg");
+		chk_warn(handle_msg((void*)ptr, sze, &msg, fn, &data) < 0,
+			 "handle_msg");
 	}
 }
 
