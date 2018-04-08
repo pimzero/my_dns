@@ -25,7 +25,6 @@ enum opcode {
 #define LOG(...) printf(__FILE__ ":" xstr(__LINE__) " " __VA_ARGS__)
 
 #define IOV(Buf, Sze) (struct iovec){ .iov_base = Buf, .iov_len = Sze }
-#define FRONT(Msg) ((--(Msg)->msg_iov)[(Msg)->msg_iovlen++,0])
 #define BACK(Msg) ((Msg)->msg_iov[(Msg)->msg_iovlen++])
 
 struct dns_req {
@@ -66,6 +65,8 @@ static void init_sockets() {
 	chk_err((fd_##T = socket(AF_INET, Sock, 0)) < 0, "socket(" #Sock ")"); \
 	chk_err(setsockopt(fd_##T, SOL_SOCKET, SO_REUSEPORT, &optval, \
 			   sizeof(optval)) < 0, "setsockopt"); \
+	chk_err(setsockopt(fd_##T, SOL_SOCKET, SO_REUSEADDR, &optval, \
+			   sizeof(optval)) < 0, "setsockopt"); \
 	chk_err(bind(fd_##T, sa, sizeof(saddr)) < 0, "bind(" #T ")"); \
 	} while (0)
 
@@ -84,7 +85,7 @@ static int epoll_add(int epollfd, int fd, int events) {
 	return epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev);
 }
 
-typedef int (*send_fn)(struct msghdr* msg, uint16_t sze, void* data);
+typedef int (*send_fn)(struct msghdr* msg, void* data);
 
 int find_record(enum type type, void* buf, size_t sze, struct iovec* iov) {
 	static char space[24];
@@ -123,7 +124,46 @@ static int handle_QUERY(struct dns_req* rq, size_t sze, struct msghdr* msg,
 	BACK(msg) = IOV(&ans, sizeof(ans));
 	find_record(type, rq->payload, q - rq->payload, &BACK(msg));
 
-	return cb(msg, sze + sizeof(ans), data);
+	return cb(msg, data);
+}
+
+static int print_rq(struct dns_req* rq) {
+	static const char* opcode_str[] = {
+#define X(I) [opcode_##I] = #I
+		X(QUERY),
+#undef X
+	};
+
+	static const char* type_str[] = {
+#define X(I) [type_##I] = #I
+		X(A),
+		X(NS),
+		X(CNAME),
+		X(SOA),
+		X(PTR),
+		X(MX),
+		X(TXT),
+		X(AAAA),
+#undef X
+	};
+
+	printf("%s\n", opcode_str[rq->op]);
+
+	size_t j = 0;
+	size_t cnt = ntohs(rq->qdcount);
+	for (size_t i = 0; i < cnt; i++) {
+		printf("  - ");
+		while (rq->payload[j]) {
+			int sze = (uint8_t)rq->payload[j];
+			printf("%.*s.", sze, rq->payload + j + 1);
+			j += sze + 1;
+		}
+		j++;
+		size_t type = ntohs(*(uint16_t*)&rq->payload[j]);
+		printf(" (%s)\n", type_str[type]);
+	}
+
+	return 0;
 }
 
 static int handle_msg(struct dns_req* rq, size_t sze, struct msghdr* hdr,
@@ -137,6 +177,7 @@ static int handle_msg(struct dns_req* rq, size_t sze, struct msghdr* hdr,
 
 	if (rq->op >= arrsze(opcode_handler) || !opcode_handler[rq->op])
 		return -1;
+	print_rq(rq);
 	return opcode_handler[rq->op](rq, sze, hdr, cb, data);
 }
 
@@ -146,9 +187,7 @@ struct data_udp {
 	int fd;
 };
 
-static int reply_udp(struct msghdr* msg, uint16_t sze, void* data) {
-	(void)sze;
-
+static int reply_udp(struct msghdr* msg, void* data) {
 	struct data_udp* d = data;
 	msg->msg_name = &d->saddr;
 	msg->msg_namelen = d->saddrlen;
@@ -156,12 +195,15 @@ static int reply_udp(struct msghdr* msg, uint16_t sze, void* data) {
 	return sendmsg(d->fd, msg, 0);
 }
 
-static int reply_tcp(struct msghdr* msg, uint16_t len, void* data) {
+static int reply_tcp(struct msghdr* msg, void* data) {
 	int fd = *(int*)data;
 
-	len = htons(len);
+	size_t len = 0;
+	for (size_t i = 0; i < msg->msg_iovlen; i++)
+		len += msg->msg_iov[i].iov_len;
 
-	FRONT(msg) = IOV(&len, sizeof(len));
+	len -= 2;
+	*(uint16_t*)msg->msg_iov->iov_base = htons(len);
 
 	int out = sendmsg(fd, msg, 0);
 	close(fd);
@@ -171,7 +213,7 @@ static int reply_tcp(struct msghdr* msg, uint16_t len, void* data) {
 static void dns_loop(int efd) {
 	struct iovec iov[8];
 	struct msghdr msg = {
-		.msg_iov = iov + 1, // We may prepend the size with tcp
+		.msg_iov = iov, // We may prepend the size with tcp
 		.msg_iovlen = 0,
 	};
 
@@ -202,6 +244,7 @@ static void dns_loop(int efd) {
 				       &data.udp.saddr, &data.udp.saddrlen);
 			chk_warn(sze < 0, "recvfrom");
 			fn = reply_udp;
+			BACK(&msg) = IOV(ptr, sze);
 		} else {
 			sze = recv(ev[i].data.fd, buf, sizeof(buf), 0);
 			chk_warn(sze < 0, "recv");
@@ -209,8 +252,8 @@ static void dns_loop(int efd) {
 			ptr += 2;
 			data.fd = ev[i].data.fd;
 			fn = reply_tcp;
+			BACK(&msg) = IOV(buf, sze + 2);
 		}
-		BACK(&msg) = IOV(ptr, sze);
 
 		chk_warn(handle_msg((void*)ptr, sze, &msg, fn, &data) < 0,
 			 "handle_msg");
