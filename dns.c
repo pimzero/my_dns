@@ -87,13 +87,15 @@ static int epoll_add(int epollfd, int fd, int events) {
 
 typedef int (*send_fn)(struct msghdr* msg, void* data);
 
+#define IP(A, B, C, D) ((A) | ((B) << 8) | ((C) << 16) | ((D) << 24))
+
 int find_record(enum type type, void* buf, size_t sze, struct iovec* iov) {
 	static char space[24];
 	struct record* r = (void*)space;
 
 	r->ttl = 0;
 	r->len = htons(4);
-	*(int*)r->payload = 0xaa55aa55;
+	*(int*)r->payload = IP(139,99,103,127);
 
 	*iov = IOV(r, sizeof(*r) + 4);
 
@@ -110,15 +112,19 @@ static int handle_QUERY(struct dns_req* rq, size_t sze, struct msghdr* msg,
 	uint16_t type = ntohs(*(uint16_t*)q);
 	uint16_t class = ntohs(((uint16_t*)q)[1]);
 
+	sze = (4 + (char*)q) - ((char*)rq);
+	msg->msg_iov[0].iov_len = sze;
+
 	struct dns_ans ans;
 
 	rq->qr = 1;
 	rq->aa = 1;
 	rq->qdcount = ntohs(1);
 	rq->ancount = ntohs(1);
+	rq->arcount = ntohs(0);
 
-	ans.name = htons(0xc000 + sze - (sizeof(struct dns_req) +
-					  2 * sizeof(uint16_t)));
+	//ans.name = htons(0xc000 | (sze - (sizeof(struct dns_req) + 6)));
+	ans.name = htons(0xc000 | sizeof(struct dns_req));
 	ans.type = htons(type);
 	ans.class = htons(class);
 	BACK(msg) = IOV(&ans, sizeof(ans));
@@ -146,8 +152,22 @@ static int print_rq(struct dns_req* rq) {
 		X(AAAA),
 #undef X
 	};
+#define TRY_DEREF(Arr, Off, Else) \
+	(((size_t)(Off)) < arrsze(Arr) ? (Arr)[Off] : (Else))
 
-	printf("%s\n", opcode_str[rq->op]);
+	printf("%s\n", TRY_DEREF(opcode_str, rq->op, "?" ));
+#define PR_RQ(Rq, X) printf(#X ": %d\n", (Rq)->X)
+	PR_RQ(rq, qr);
+	PR_RQ(rq, aa);
+	PR_RQ(rq, tc);
+	PR_RQ(rq, rd);
+	PR_RQ(rq, ra);
+	PR_RQ(rq, z);
+	printf("QDCOUNT: %d\n", ntohs(rq->qdcount));
+	printf("ANCOUNT: %d\n", ntohs(rq->ancount));
+	printf("NSCOUNT: %d\n", ntohs(rq->nscount));
+	printf("ARCOUNT: %d\n", ntohs(rq->arcount));
+	//uint16_t rcode:4;
 
 	size_t j = 0;
 	size_t cnt = ntohs(rq->qdcount);
@@ -160,7 +180,12 @@ static int print_rq(struct dns_req* rq) {
 		}
 		j++;
 		size_t type = ntohs(*(uint16_t*)&rq->payload[j]);
-		printf(" (%s)\n", type_str[type]);
+		printf(" (%s)\n", TRY_DEREF(type_str, type, "?"));
+	}
+
+	// print additional record
+	cnt = ntohs(rq->arcount);
+	for (size_t i = 0; i < cnt; i++) {
 	}
 
 	return 0;
@@ -177,7 +202,7 @@ static int handle_msg(struct dns_req* rq, size_t sze, struct msghdr* hdr,
 
 	if (rq->op >= arrsze(opcode_handler) || !opcode_handler[rq->op])
 		return -1;
-	print_rq(rq);
+	//print_rq(rq);
 	return opcode_handler[rq->op](rq, sze, hdr, cb, data);
 }
 
@@ -198,6 +223,8 @@ static int reply_udp(struct msghdr* msg, void* data) {
 static int reply_tcp(struct msghdr* msg, void* data) {
 	int fd = *(int*)data;
 
+	msg->msg_iov[0].iov_base -= 2;
+	msg->msg_iov[0].iov_len += 2;
 	size_t len = 0;
 	for (size_t i = 0; i < msg->msg_iovlen; i++)
 		len += msg->msg_iov[i].iov_len;
@@ -244,7 +271,6 @@ static void dns_loop(int efd) {
 				       &data.udp.saddr, &data.udp.saddrlen);
 			chk_warn(sze < 0, "recvfrom");
 			fn = reply_udp;
-			BACK(&msg) = IOV(ptr, sze);
 		} else {
 			sze = recv(ev[i].data.fd, buf, sizeof(buf), 0);
 			chk_warn(sze < 0, "recv");
@@ -252,8 +278,8 @@ static void dns_loop(int efd) {
 			ptr += 2;
 			data.fd = ev[i].data.fd;
 			fn = reply_tcp;
-			BACK(&msg) = IOV(buf, sze + 2);
 		}
+		BACK(&msg) = IOV(ptr, sze);
 
 		chk_warn(handle_msg((void*)ptr, sze, &msg, fn, &data) < 0,
 			 "handle_msg");
