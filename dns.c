@@ -133,64 +133,6 @@ static int handle_QUERY(struct dns_req* rq, size_t sze, struct msghdr* msg,
 	return cb(msg, data);
 }
 
-static int print_rq(struct dns_req* rq) {
-	static const char* opcode_str[] = {
-#define X(I) [opcode_##I] = #I
-		X(QUERY),
-#undef X
-	};
-
-	static const char* type_str[] = {
-#define X(I) [type_##I] = #I
-		X(A),
-		X(NS),
-		X(CNAME),
-		X(SOA),
-		X(PTR),
-		X(MX),
-		X(TXT),
-		X(AAAA),
-#undef X
-	};
-#define TRY_DEREF(Arr, Off, Else) \
-	(((size_t)(Off)) < arrsze(Arr) ? (Arr)[Off] : (Else))
-
-	printf("%s\n", TRY_DEREF(opcode_str, rq->op, "?" ));
-#define PR_RQ(Rq, X) printf(#X ": %d\n", (Rq)->X)
-	PR_RQ(rq, qr);
-	PR_RQ(rq, aa);
-	PR_RQ(rq, tc);
-	PR_RQ(rq, rd);
-	PR_RQ(rq, ra);
-	PR_RQ(rq, z);
-	printf("QDCOUNT: %d\n", ntohs(rq->qdcount));
-	printf("ANCOUNT: %d\n", ntohs(rq->ancount));
-	printf("NSCOUNT: %d\n", ntohs(rq->nscount));
-	printf("ARCOUNT: %d\n", ntohs(rq->arcount));
-	//uint16_t rcode:4;
-
-	size_t j = 0;
-	size_t cnt = ntohs(rq->qdcount);
-	for (size_t i = 0; i < cnt; i++) {
-		printf("  - ");
-		while (rq->payload[j]) {
-			int sze = (uint8_t)rq->payload[j];
-			printf("%.*s.", sze, rq->payload + j + 1);
-			j += sze + 1;
-		}
-		j++;
-		size_t type = ntohs(*(uint16_t*)&rq->payload[j]);
-		printf(" (%s)\n", TRY_DEREF(type_str, type, "?"));
-	}
-
-	// print additional record
-	cnt = ntohs(rq->arcount);
-	for (size_t i = 0; i < cnt; i++) {
-	}
-
-	return 0;
-}
-
 static int handle_msg(struct dns_req* rq, size_t sze, struct msghdr* hdr,
 		      send_fn cb, void* data) {
 	int (*opcode_handler[])(struct dns_req*, size_t, struct msghdr*,
@@ -202,7 +144,6 @@ static int handle_msg(struct dns_req* rq, size_t sze, struct msghdr* hdr,
 
 	if (rq->op >= arrsze(opcode_handler) || !opcode_handler[rq->op])
 		return -1;
-	//print_rq(rq);
 	return opcode_handler[rq->op](rq, sze, hdr, cb, data);
 }
 
