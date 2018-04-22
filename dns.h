@@ -6,6 +6,7 @@
 #include <sys/uio.h>
 
 #define __packed __attribute__((packed))
+#define IOV(Buf, Sze) (struct iovec){ .iov_base = Buf, .iov_len = Sze }
 
 enum type {
 	type_A = 1,

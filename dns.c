@@ -15,16 +15,10 @@ enum opcode {
 	opcode_QUERY = 0,
 };
 
-#define A(a, b, c, d) .len = 4, .type = type_A, .value = (void*)(a|(b<<8)|(c<<16)|(d<<24))
-
 #define chk_err(X, MSG) do { if (X) { perror(MSG); exit(1); } } while (0)
 #define chk_warn(X, MSG) do { if (X) { perror(MSG); } } while (0)
 #define arrsze(X) (sizeof(X) / sizeof(*(X)))
-#define xstr(s) str(s)
-#define str(s) #s
-#define LOG(...) printf(__FILE__ ":" xstr(__LINE__) " " __VA_ARGS__)
 
-#define IOV(Buf, Sze) (struct iovec){ .iov_base = Buf, .iov_len = Sze }
 #define BACK(Msg) ((Msg)->msg_iov[(Msg)->msg_iovlen++])
 
 struct dns_req {
@@ -69,10 +63,8 @@ static void init_sockets() {
 			   sizeof(optval)) < 0, "setsockopt"); \
 	chk_err(bind(fd_##T, sa, sizeof(saddr)) < 0, "bind(" #T ")"); \
 	} while (0)
-
 	init_sock(udp, SOCK_DGRAM);
 	init_sock(tcp, SOCK_STREAM);
-
 #undef init_sock
 
 	chk_err(listen(fd_tcp, 0) < 0, "listen(tcp)");
@@ -87,23 +79,16 @@ static int epoll_add(int epollfd, int fd, int events) {
 
 typedef int (*send_fn)(struct msghdr* msg, void* data);
 
-#define IP(A, B, C, D) ((A) | ((B) << 8) | ((C) << 16) | ((D) << 24))
+static int handle_QUERY(struct dns_req* rq, size_t sze, send_fn cb,
+			void* data) {
+	struct iovec iov[8];
+	struct msghdr msg = {
+		.msg_iov = iov,
+		.msg_iovlen = 0,
+	};
 
-int find_record(enum type type, void* buf, size_t sze, struct iovec* iov) {
-	static char space[24];
-	struct record* r = (void*)space;
+	BACK(&msg) = IOV(rq, sze);
 
-	r->ttl = 0;
-	r->len = htons(4);
-	*(int*)r->payload = IP(139,99,103,127);
-
-	*iov = IOV(r, sizeof(*r) + 4);
-
-	return 0;
-}
-
-static int handle_QUERY(struct dns_req* rq, size_t sze, struct msghdr* msg,
-			send_fn cb, void* data) {
 	char* q = rq->payload;
 	while (*q) {
 		q += (unsigned int)*q + 1;
@@ -113,7 +98,7 @@ static int handle_QUERY(struct dns_req* rq, size_t sze, struct msghdr* msg,
 	uint16_t class = ntohs(((uint16_t*)q)[1]);
 
 	sze = (4 + (char*)q) - ((char*)rq);
-	msg->msg_iov[0].iov_len = sze;
+	msg.msg_iov[0].iov_len = sze;
 
 	struct dns_ans ans;
 
@@ -123,20 +108,17 @@ static int handle_QUERY(struct dns_req* rq, size_t sze, struct msghdr* msg,
 	rq->ancount = ntohs(1);
 	rq->arcount = ntohs(0);
 
-	//ans.name = htons(0xc000 | (sze - (sizeof(struct dns_req) + 6)));
 	ans.name = htons(0xc000 | sizeof(struct dns_req));
 	ans.type = htons(type);
 	ans.class = htons(class);
-	BACK(msg) = IOV(&ans, sizeof(ans));
-	find_record(type, rq->payload, q - rq->payload, &BACK(msg));
+	BACK(&msg) = IOV(&ans, sizeof(ans));
+	find_record(type, rq->payload, q - rq->payload, &BACK(&msg));
 
-	return cb(msg, data);
+	return cb(&msg, data);
 }
 
-static int handle_msg(struct dns_req* rq, size_t sze, struct msghdr* hdr,
-		      send_fn cb, void* data) {
-	int (*opcode_handler[])(struct dns_req*, size_t, struct msghdr*,
-				send_fn, void*) = {
+static int handle_msg(struct dns_req* rq, size_t sze, send_fn cb, void* data) {
+	int (*opcode_handler[])(struct dns_req*, size_t, send_fn, void*) = {
 #define X(I) [opcode_##I] = handle_##I
 		X(QUERY),
 #undef X
@@ -144,7 +126,7 @@ static int handle_msg(struct dns_req* rq, size_t sze, struct msghdr* hdr,
 
 	if (rq->op >= arrsze(opcode_handler) || !opcode_handler[rq->op])
 		return -1;
-	return opcode_handler[rq->op](rq, sze, hdr, cb, data);
+	return opcode_handler[rq->op](rq, sze, cb, data);
 }
 
 struct data_udp {
@@ -164,13 +146,13 @@ static int reply_udp(struct msghdr* msg, void* data) {
 static int reply_tcp(struct msghdr* msg, void* data) {
 	int fd = *(int*)data;
 
-	msg->msg_iov[0].iov_base -= 2;
-	msg->msg_iov[0].iov_len += 2;
 	size_t len = 0;
 	for (size_t i = 0; i < msg->msg_iovlen; i++)
 		len += msg->msg_iov[i].iov_len;
 
-	len -= 2;
+	msg->msg_iov[0].iov_base -= 2;
+	msg->msg_iov[0].iov_len += 2;
+
 	*(uint16_t*)msg->msg_iov->iov_base = htons(len);
 
 	int out = sendmsg(fd, msg, 0);
@@ -178,52 +160,52 @@ static int reply_tcp(struct msghdr* msg, void* data) {
 	return out;
 }
 
-static void dns_loop(int efd) {
-	struct iovec iov[8];
-	struct msghdr msg = {
-		.msg_iov = iov, // We may prepend the size with tcp
-		.msg_iovlen = 0,
-	};
-
-	struct epoll_event ev[16];
+static void dns_iter(int fd) {
 	char buf[1024];
 	char* ptr = buf;
 	ssize_t sze;
+
+	union {
+		struct data_udp udp;
+		int fd;
+	} data;
+	send_fn fn;
+
+	if (fd == fd_udp) {
+		data.udp.saddrlen = sizeof(data.udp.saddr);
+		data.udp.fd = fd_udp;
+		sze = recvfrom(fd_udp, buf, sizeof(buf), MSG_DONTWAIT,
+			       &data.udp.saddr, &data.udp.saddrlen);
+		chk_warn(sze < 0, "recvfrom");
+		fn = reply_udp;
+	} else {
+		sze = recv(fd, buf, sizeof(buf), 0);
+		chk_warn(sze < 0, "recv");
+		sze = ntohs(*(uint16_t*)buf);
+		ptr += 2;
+		data.fd = fd;
+		fn = reply_tcp;
+	}
+
+	chk_warn(handle_msg((void*)ptr, sze, fn, &data) < 0, "handle_msg");
+}
+
+static void dns_new_tcp(int fd, int efd) {
+	int afd = accept(fd_tcp, NULL, 0);
+	chk_warn(afd < 0, "accept");
+	chk_warn(epoll_add(efd, afd, EPOLLIN|EPOLLET) < 0, "epoll_add");
+}
+
+static void dns_loop(int efd) {
+	struct epoll_event ev[16];
 	int nfds = epoll_wait(efd, ev, arrsze(ev), -1);
 	chk_err(nfds < 0, "epoll_wait");
 
 	for (int i = 0; i < nfds; i++) {
-		union {
-			struct data_udp udp;
-			int fd;
-		} data;
-		send_fn fn;
-
-		if (ev[i].data.fd == fd_tcp) {
-			int fd = accept(fd_tcp, NULL, 0);
-			chk_err(fd < 0, "accept");
-			chk_err(epoll_add(efd, fd, EPOLLIN|EPOLLET) < 0,
-					  "epoll_add");
-			continue;
-		} else if (ev[i].data.fd == fd_udp) {
-			data.udp.saddrlen = sizeof(data.udp.saddr);
-			data.udp.fd = fd_udp;
-			sze = recvfrom(fd_udp, buf, sizeof(buf), MSG_DONTWAIT,
-				       &data.udp.saddr, &data.udp.saddrlen);
-			chk_warn(sze < 0, "recvfrom");
-			fn = reply_udp;
-		} else {
-			sze = recv(ev[i].data.fd, buf, sizeof(buf), 0);
-			chk_warn(sze < 0, "recv");
-			sze = ntohs(*(uint16_t*)buf);
-			ptr += 2;
-			data.fd = ev[i].data.fd;
-			fn = reply_tcp;
-		}
-		BACK(&msg) = IOV(ptr, sze);
-
-		chk_warn(handle_msg((void*)ptr, sze, &msg, fn, &data) < 0,
-			 "handle_msg");
+		if (ev[i].data.fd == fd_tcp)
+			dns_new_tcp(ev[i].data.fd, efd);
+		else
+			dns_iter(ev[i].data.fd);
 	}
 }
 
