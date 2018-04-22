@@ -11,12 +11,16 @@
 
 #include "dns.h"
 
+#ifdef USE_SECCOMP
+#include <seccomp.h>
+#endif
+
 enum opcode {
 	opcode_QUERY = 0,
 };
 
-#define chk_err(X, MSG) do { if (X) { perror(MSG); exit(1); } } while (0)
-#define chk_warn(X, MSG) do { if (X) { perror(MSG); } } while (0)
+#define chk_err(X, MSG) do { if ((X)) { perror(MSG); exit(1); } } while (0)
+#define chk_warn(X, MSG) do { if ((X)) { perror(MSG); } } while (0)
 #define arrsze(X) (sizeof(X) / sizeof(*(X)))
 
 #define BACK(Msg) ((Msg)->msg_iov[(Msg)->msg_iovlen++])
@@ -190,7 +194,7 @@ static void dns_iter(int fd) {
 	chk_warn(handle_msg((void*)ptr, sze, fn, &data) < 0, "handle_msg");
 }
 
-static void dns_new_tcp(int fd, int efd) {
+static void dns_new_tcp(int efd) {
 	int afd = accept(fd_tcp, NULL, 0);
 	chk_warn(afd < 0, "accept");
 	chk_warn(epoll_add(efd, afd, EPOLLIN|EPOLLET) < 0, "epoll_add");
@@ -203,7 +207,7 @@ static void dns_loop(int efd) {
 
 	for (int i = 0; i < nfds; i++) {
 		if (ev[i].data.fd == fd_tcp)
-			dns_new_tcp(ev[i].data.fd, efd);
+			dns_new_tcp(efd);
 		else
 			dns_iter(ev[i].data.fd);
 	}
@@ -217,6 +221,19 @@ int main() {
 
 	chk_err(epoll_add(efd, fd_tcp, EPOLLIN) < 0, "epoll_add");
 	chk_err(epoll_add(efd, fd_udp, EPOLLIN) < 0, "epoll_add");
+
+#ifdef USE_SECCOMP
+	scmp_filter_ctx ctx;
+	chk_err(!(ctx = seccomp_init(SCMP_ACT_KILL)), "seccomp_init");
+
+#define X(S) chk_err(seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(S), 0) < 0,\
+		     "seccomp_rule_add(" #S ")");
+	X(accept); X(close); X(epoll_ctl); X(epoll_pwait); X(epoll_wait);
+	X(recv); X(recvfrom); X(sendmsg); X(write);
+#undef X
+
+	chk_err(seccomp_load(ctx) < 0, "seccomp_load");
+#endif
 
 	while (1)
 		dns_loop(efd);
