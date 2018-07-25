@@ -23,6 +23,8 @@ enum opcode {
 
 #define __weak __attribute__((weak))
 
+enum log_level log_level = LOG_INFO;
+
 int __weak backend_init(int argc, char** argv) {
 	(void)argc;
 	(void)argv;

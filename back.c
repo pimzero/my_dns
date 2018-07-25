@@ -11,7 +11,7 @@
 
 #include "dns.h"
 
-#define log(...) fprintf(stderr, "backend: " __VA_ARGS__);
+#define log(X, ...) LOG(X, "backend: " __VA_ARGS__);
 
 #define IP(A, B, C, D) ((A) | ((B) << 8) | ((C) << 16) | ((D) << 24))
 
@@ -33,10 +33,6 @@ static int parse_line(const char* str, struct entry* e) {
 	char* saveptr = NULL;
 	char* s;
 	char* delim = " ";
-
-	// comment line start with '#'
-	if (*str == '#' || *str == '\0')
-		return 0;
 
 	int err = -1;
 	char* tmpstr = strdup(str);
@@ -87,11 +83,16 @@ static int load_file(FILE* file) {
 		if (nread > 0 && line[nread - 1] == '\n')
 			line[nread - 1] = '\0';
 
+		// comment line start with '#'
+		if (*line == '#' || *line == '\0')
+			continue;
+
 		entries.count++;
 		entries.table = realloc(entries.table,
 					entries.count * sizeof(*entries.table));
+		memset(&entries.table[entries.count - 1], 0, sizeof(*entries.table));
 		if (parse_line(line, &entries.table[entries.count - 1]) < 0) {
-			log("Could not parse line \"%s\"\n", line);
+			log(ERR, "Could not parse line \"%s\"\n", line);
 			return - 1;
 		}
 	}
@@ -119,7 +120,7 @@ const char* ro_strdup(const char* str) {
 
 int backend_init(int argc, char** argv) {
 	if (argc < 2) {
-		log("Not enough arguments");
+		log(ERR, "Not enough arguments");
 		return -1;
 	}
 
@@ -137,7 +138,7 @@ int backend_init(int argc, char** argv) {
 }
 
 int backend_reload(void) {
-	log("reloading\n");
+	log(WARN, "reloading\n");
 	for (size_t i = 0; i < entries.count; i++) {
 		free(entries.table[i].name);
 		free(entries.table[i].record);
@@ -145,11 +146,11 @@ int backend_reload(void) {
 	entries.count = 0;
 	FILE* file = fopen(fname, "r");
 	if (load_file(file) < 0) {
-		log("load_file failed\n");
+		log(ERR, "load_file failed\n");
 		exit(1);
 	}
 	fclose(file);
-	log("reloaded\n");
+	log(INFO, "reloaded\n");
 	return 0;
 }
 
@@ -196,20 +197,22 @@ int find_record(enum type type, void* buf, size_t sze, struct iovec* iov) {
 	char name[256];
 	*iov = IOV(NULL, 0);
 	if (record_to_str(name, sizeof(name), buf, sze) < 0) {
-		log("record_to_str failed\n");
+		log(ERR, "record_to_str failed\n");
 		return rcode_servfail;
 	}
 
 	for (size_t i = 0; i < entries.count; i++) {
 		if (entries.table[i].type == type &&
 		    !strcasecmp(entries.table[i].name, name)) {
-			log("%s %s\n", entries.table[i].name, name);
+			log(INFO, "Found: \"%s\"\n", name);
 			*iov = IOV(entries.table[i].record,
 				   entries.table[i].record_len);
 			break;
 		}
 	}
-	if (!iov->iov_base)
+	if (!iov->iov_base) {
+		log(INFO, "Not found: \"%s\"\n", name);
 		return rcode_nxdomain;
+	}
 	return rcode_ok;
 }

@@ -56,6 +56,15 @@ int find_record(enum type type, void* buf, size_t sze, struct iovec* value);
 int backend_init(int argc, char** argv);
 int backend_reload(void);
 
+enum log_level {
+	LOG_ERR = 0,
+	LOG_WARN = 1,
+	LOG_INFO = 2,
+};
+extern enum log_level log_level;
+
+#define LOG(Level, ...) (log_level>=(LOG_##Level)?fprintf(stderr,__VA_ARGS__):0)
+
 #ifdef USE_SECCOMP
 int backend_seccomp_rule(scmp_filter_ctx* ctx);
 #endif
