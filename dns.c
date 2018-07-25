@@ -1,19 +1,15 @@
+#include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-
-#include <string.h>
 #include <unistd.h>
 
 #include "dns.h"
-
-#ifdef USE_SECCOMP
-#include <seccomp.h>
-#endif
 
 enum opcode {
 	opcode_QUERY = 0,
@@ -24,6 +20,25 @@ enum opcode {
 #define arrsze(X) (sizeof(X) / sizeof(*(X)))
 
 #define BACK(Msg) ((Msg)->msg_iov[(Msg)->msg_iovlen++])
+
+#define __weak __attribute__((weak))
+
+int __weak backend_init(int argc, char** argv) {
+	(void)argc;
+	(void)argv;
+	return 0;
+}
+
+int __weak backend_reload(void) {
+	return 0;
+}
+
+#ifdef USE_SECCOMP
+int __weak backend_seccomp_rule(scmp_filter_ctx* ctx) {
+	(void)ctx;
+	return 0;
+}
+#endif
 
 struct dns_req {
 	uint16_t id;
@@ -203,6 +218,8 @@ static void dns_new_tcp(int efd) {
 static void dns_loop(int efd) {
 	struct epoll_event ev[16];
 	int nfds = epoll_wait(efd, ev, arrsze(ev), -1);
+	if (nfds < 0 && errno == EINTR)
+		return;
 	chk_err(nfds < 0, "epoll_wait");
 
 	for (int i = 0; i < nfds; i++) {
@@ -213,7 +230,17 @@ static void dns_loop(int efd) {
 	}
 }
 
-int main() {
+static void sigusr_handler(int s) {
+	(void)s;
+	backend_reload();
+}
+
+int main(int argc, char** argv) {
+	if (backend_init(argc, argv) < 0)
+		return 1;
+
+	signal(SIGUSR1, sigusr_handler);
+
 	init_sockets();
 
 	int efd = epoll_create1(0);
@@ -229,9 +256,10 @@ int main() {
 #define X(S) chk_err(seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(S), 0) < 0,\
 		     "seccomp_rule_add(" #S ")");
 	X(accept); X(close); X(epoll_ctl); X(epoll_pwait); X(epoll_wait);
-	X(recv); X(recvfrom); X(sendmsg); X(write);
+	X(recv); X(recvfrom); X(sendmsg); X(write); X(rt_sigreturn);
+	X(exit_group);
 #undef X
-
+	chk_err(backend_seccomp_rule(&ctx) < 0, "backend_seccomp_rule");
 	chk_err(seccomp_load(ctx) < 0, "seccomp_load");
 #endif
 

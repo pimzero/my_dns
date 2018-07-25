@@ -5,6 +5,10 @@
 #include <stdint.h>
 #include <sys/uio.h>
 
+#ifdef USE_SECCOMP
+#include <seccomp.h>
+#endif
+
 #define __packed __attribute__((packed))
 #define IOV(Buf, Sze) (struct iovec){ .iov_base = Buf, .iov_len = Sze }
 
@@ -26,5 +30,11 @@ struct record {
 } __packed;
 
 int find_record(enum type type, void* buf, size_t sze, struct iovec* value);
+int backend_init(int argc, char** argv);
+int backend_reload(void);
+
+#ifdef USE_SECCOMP
+int backend_seccomp_rule(scmp_filter_ctx* ctx);
+#endif
 
 #endif
