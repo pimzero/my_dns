@@ -40,23 +40,6 @@ int __weak backend_seccomp_rule(scmp_filter_ctx* ctx) {
 }
 #endif
 
-struct dns_req {
-	uint16_t id;
-	uint16_t qr:1;
-	uint16_t op:4;
-	uint16_t aa:1;
-	uint16_t tc:1;
-	uint16_t rd:1;
-	uint16_t ra:1;
-	uint16_t z:3;
-	uint16_t rcode:4;
-	uint16_t qdcount;
-	uint16_t ancount;
-	uint16_t nscount;
-	uint16_t arcount;
-	char payload[0];
-} __packed;
-
 struct dns_ans {
 	uint16_t name;
 	uint16_t type;
@@ -131,7 +114,14 @@ static int handle_QUERY(struct dns_req* rq, size_t sze, send_fn cb,
 	ans.type = htons(type);
 	ans.class = htons(class);
 	BACK(&msg) = IOV(&ans, sizeof(ans));
-	find_record(type, rq->payload, q - rq->payload, &BACK(&msg));
+	rq->rcode = find_record(type, rq->payload, q - rq->payload, &BACK(&msg));
+#if 0
+	rq->rcode = 3; // XXX: nxerror but dig doesnt show it. Try wireshark ?
+	if (rq->rcode) {
+		rq->ancount = ntohs(0);
+		rq->arcount = ntohs(0);
+	}
+#endif
 
 	return cb(&msg, data);
 }

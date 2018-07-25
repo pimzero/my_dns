@@ -61,7 +61,7 @@ static int parse_line(const char* str, struct entry* e) {
 		if (!e->name)
 			return -1;
 
-		e->record_len = 24 + 4;
+		e->record_len = 4 + 2 + 4;
 
 		s = strtok_r(NULL, delim, &saveptr);
 		sscanf(s, "%hhd.%hhd.%hhd.%hhd",
@@ -69,7 +69,7 @@ static int parse_line(const char* str, struct entry* e) {
 		       e->record->payload + 1,
 		       e->record->payload + 2,
 		       e->record->payload + 3);
-		e->record->ttl = htons((uint16_t)ttl_long);
+		e->record->ttl = htonl(ttl_long);
 		e->record->len = htons(4);
 
 		err = 0;
@@ -197,7 +197,7 @@ int find_record(enum type type, void* buf, size_t sze, struct iovec* iov) {
 	*iov = IOV(NULL, 0);
 	if (record_to_str(name, sizeof(name), buf, sze) < 0) {
 		log("record_to_str failed\n");
-		return 0;
+		return rcode_servfail;
 	}
 
 	for (size_t i = 0; i < entries.count; i++) {
@@ -209,5 +209,7 @@ int find_record(enum type type, void* buf, size_t sze, struct iovec* iov) {
 			break;
 		}
 	}
-	return 0;
+	if (!iov->iov_base)
+		return rcode_nxdomain;
+	return rcode_ok;
 }

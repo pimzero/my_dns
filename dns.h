@@ -23,9 +23,32 @@ enum type {
 	type_AAAA = 28,
 };
 
+enum rcode {
+	rcode_ok = 0,
+	rcode_servfail = 2,
+	rcode_nxdomain = 3,
+};
+
 struct record {
 	uint32_t ttl;
 	uint16_t len;
+	char payload[0];
+} __packed;
+
+struct dns_req {
+	uint16_t id;
+	uint16_t rd:1;
+	uint16_t tc:1;
+	uint16_t aa:1;
+	uint16_t op:4;
+	uint16_t qr:1;
+	uint16_t rcode:4;
+	uint16_t z:3;
+	uint16_t ra:1;
+	uint16_t qdcount;
+	uint16_t ancount;
+	uint16_t nscount;
+	uint16_t arcount;
 	char payload[0];
 } __packed;
 
