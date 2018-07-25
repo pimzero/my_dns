@@ -120,7 +120,7 @@ const char* ro_strdup(const char* str) {
 
 int backend_init(int argc, char** argv) {
 	if (argc < 2) {
-		log(ERR, "Not enough arguments");
+		log(ERR, "Not enough arguments\n");
 		return -1;
 	}
 
@@ -134,6 +134,7 @@ int backend_init(int argc, char** argv) {
 	int ret = load_file(file);
 	fclose(file);
 
+	log(INFO, "Initialized\n");
 	return ret;
 }
 
