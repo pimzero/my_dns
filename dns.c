@@ -56,6 +56,7 @@ static void init_sockets() {
 	struct sockaddr_in saddr = {
 		.sin_family = AF_INET,
 		.sin_port = htons(53),
+		.sin_addr = { 0 },
 	};
 	struct sockaddr* sa = (struct sockaddr*)&saddr;
 
