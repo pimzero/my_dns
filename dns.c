@@ -223,7 +223,7 @@ static void dns_loop(int efd) {
 	}
 }
 
-static void sigusr_handler(int s) {
+static void sighup_handler(int s) {
 	(void)s;
 	backend_reload();
 }
@@ -232,7 +232,7 @@ int main(int argc, char** argv) {
 	if (backend_init(argc, argv) < 0)
 		return 1;
 
-	signal(SIGUSR1, sigusr_handler);
+	signal(SIGHUP, sighup_handler);
 
 	init_sockets();
 
