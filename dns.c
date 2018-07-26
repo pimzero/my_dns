@@ -296,6 +296,8 @@ int main(int argc, char** argv) {
 	X(accept); X(close); X(epoll_ctl); X(epoll_pwait); X(epoll_wait);
 	X(recv); X(recvfrom); X(sendmsg); X(write); X(rt_sigreturn);
 	X(exit_group);
+
+	X(getpeername);
 #undef X
 	chk_err(backend_seccomp_rule(&ctx) < 0, "backend_seccomp_rule");
 	chk_err(seccomp_load(ctx) < 0, "seccomp_load");
