@@ -136,8 +136,10 @@ static int handle_msg(struct dns_req* rq, size_t sze, send_fn cb, void* data) {
 #undef X
 	};
 
-	if (rq->op >= arrsze(opcode_handler) || !opcode_handler[rq->op])
+	if (rq->op >= arrsze(opcode_handler) || !opcode_handler[rq->op]) {
+		LOG(INFO, "unknown opcode \"%d\"\n", rq->op);
 		return -1;
+	}
 	return opcode_handler[rq->op](rq, sze, cb, data);
 }
 
@@ -152,7 +154,9 @@ static int reply_udp(struct msghdr* msg, void* data) {
 	msg->msg_name = &d->saddr;
 	msg->msg_namelen = d->saddrlen;
 
-	return sendmsg(d->fd, msg, 0);
+	int out = sendmsg(d->fd, msg, 0);
+	chk_warn(out < 0, "sendmsg(reply_udp)");
+	return out;
 }
 
 static int reply_tcp(struct msghdr* msg, void* data) {
@@ -168,8 +172,35 @@ static int reply_tcp(struct msghdr* msg, void* data) {
 	*(uint16_t*)msg->msg_iov->iov_base = htons(len);
 
 	int out = sendmsg(fd, msg, 0);
-	close(fd);
+	chk_warn(out < 0, "sendmsg(reply_tcp)");
+	chk_warn(close(fd) < 0, "close(reply_tcp)");
 	return out;
+}
+
+static char* buf2hex(char* out, size_t outsze, const char* in, size_t insze) {
+	for (size_t i = 0; i < insze && i * 2 < outsze; i++)
+		sprintf(out + i * 2, "%hhx", in[i]);
+	return out;
+}
+
+static void log_tcp(int fd) {
+	union {
+		struct sockaddr sockaddr;
+		struct sockaddr_in in;
+		struct sockaddr_in6 in6;
+	} sockaddr;
+	socklen_t len = sizeof(sockaddr);
+	chk_warn(getpeername(fd, &sockaddr.sockaddr, &len) < 0,
+		 "getpeername");
+
+#define IP_BYTES(X) ((uint8_t*)&(((struct sockaddr_in*)(X))->sin_addr.s_addr))
+	LOG(INFO, "tcp msg from: %hhu.%hhu.%hhu.%hhu:%hu (family:%d)\n",
+	     IP_BYTES(&sockaddr)[0],
+	     IP_BYTES(&sockaddr)[1],
+	     IP_BYTES(&sockaddr)[2],
+	     IP_BYTES(&sockaddr)[3],
+	     sockaddr.in.sin_port,
+	     sockaddr.sockaddr.sa_family);
 }
 
 static void dns_iter(int fd) {
@@ -190,6 +221,13 @@ static void dns_iter(int fd) {
 			       &data.udp.saddr, &data.udp.saddrlen);
 		chk_warn(sze < 0, "recvfrom");
 		fn = reply_udp;
+		LOG(INFO, "udp msg from: %hhu.%hhu.%hhu.%hhu:%hu (family:%d)\n",
+			  IP_BYTES(&data.udp.saddr)[0],
+			  IP_BYTES(&data.udp.saddr)[1],
+			  IP_BYTES(&data.udp.saddr)[2],
+			  IP_BYTES(&data.udp.saddr)[3],
+			  ((struct sockaddr_in*)&data.udp.saddr)->sin_port,
+			  data.udp.saddr.sa_family);
 	} else {
 		sze = recv(fd, buf, sizeof(buf), 0);
 		chk_warn(sze < 0, "recv");
@@ -197,7 +235,12 @@ static void dns_iter(int fd) {
 		ptr += 2;
 		data.fd = fd;
 		fn = reply_tcp;
+		log_tcp(fd);
 	}
+
+	char hexbuf[sze * 2 + 1];
+	LOG(INFO, "msg received (%s): \"%s\"\n", fd == fd_udp ? "udp" : "tcp",
+	    buf2hex(hexbuf, sizeof(hexbuf), buf, sze));
 
 	chk_warn(handle_msg((void*)ptr, sze, fn, &data) < 0, "handle_msg");
 }
@@ -225,7 +268,9 @@ static void dns_loop(int efd) {
 
 static void sighup_handler(int s) {
 	(void)s;
+	LOG(INFO, "reloading config: started\n");
 	backend_reload();
+	LOG(INFO, "reloading config: finish\n");
 }
 
 int main(int argc, char** argv) {
