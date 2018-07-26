@@ -139,7 +139,6 @@ int backend_init(int argc, char** argv) {
 }
 
 int backend_reload(void) {
-	log(WARN, "reloading\n");
 	for (size_t i = 0; i < entries.count; i++) {
 		free(entries.table[i].name);
 		free(entries.table[i].record);
@@ -212,7 +211,7 @@ int find_record(enum type type, void* buf, size_t sze, struct iovec* iov) {
 		}
 	}
 	if (!iov->iov_base) {
-		log(INFO, "Not found: \"%s\"\n", name);
+		log(INFO, "Not found: \"%s\" (%d)\n", name, type);
 		return rcode_nxdomain;
 	}
 	return rcode_ok;
