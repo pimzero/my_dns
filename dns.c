@@ -179,7 +179,7 @@ static int reply_tcp(struct msghdr* msg, void* data) {
 
 static char* buf2hex(char* out, size_t outsze, const char* in, size_t insze) {
 	for (size_t i = 0; i < insze && i * 2 < outsze; i++)
-		sprintf(out + i * 2, "%hhx", in[i]);
+		sprintf(out + i * 2, "%02hhx", in[i]);
 	return out;
 }
 
