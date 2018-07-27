@@ -38,7 +38,7 @@ static int parse_line(const char* str, struct entry* e) {
 	char* tmpstr = strdup(str);
 	s = strtok_r(tmpstr, delim, &saveptr);
 
-	if (!strcmp("A", s) || !strcmp("AAAA", s)) {
+	if (!strcasecmp("A", s) || !strcasecmp("AAAA", s)) {
 		if (!strcmp("A", s))
 			e->type = type_A;
 		else
@@ -74,7 +74,7 @@ static int parse_line(const char* str, struct entry* e) {
 		e->iovec->iov_len = record_len;
 
 		err = 0;
-	} else if (!strcmp("TXT", s)) {
+	} else if (!strcasecmp("TXT", s)) {
 		e->type = type_TXT;
 		s = strtok_r(NULL, delim, &saveptr);
 		e->name = strdup(s);
@@ -102,6 +102,59 @@ static int parse_line(const char* str, struct entry* e) {
 		e->iovec = malloc(sizeof(*e->iovec));
 		e->iovec->iov_base = record;
 		e->iovec->iov_len = len + 1 + sizeof(*record);
+		err = 0;
+	} else if (!strcasecmp("MX", s)) {
+		e->type = type_MX;
+		s = strtok_r(NULL, delim, &saveptr);
+		e->name = strdup(s);
+		s = strtok_r(NULL, delim, &saveptr);
+		errno = 0;
+		uint32_t ttl = htonl(strtol(s, NULL, 0));
+		if (errno) {
+			perror("strtol");
+			return -1;
+		}
+		s = strtok_r(NULL, delim, &saveptr);
+		errno = 0;
+		uint16_t preference = htons(strtol(s, NULL, 0));
+		if (errno) {
+			perror("strtol");
+			return -1;
+		}
+		s = strtok_r(NULL, "", &saveptr);
+		if (s == NULL)
+			s = "";
+		size_t len = strlen(s);
+		if (len > 255) {
+			log(ERR, "Invalid MX entry\n");
+			return -1;
+		}
+		char* out = malloc(len + 2);
+		char* saveptr2 = NULL;
+		s = strtok_r(s, ".", &saveptr2);
+		if (!s)
+			s = "";
+		if (strlen(s) == 0)
+			len--;
+		char* cur = out;
+		do {
+			*cur = strlen(s);
+			strcpy(cur + 1, s);
+			cur += *cur + 1;
+			*cur = 0;
+		} while (s = strtok_r(NULL, ".", &saveptr2));
+
+		e->count = 1;
+		len++;
+		struct record_mx* record = malloc(len + sizeof(*record));
+		record->record.ttl = ttl;
+		record->record.len = htons(len + sizeof(*record) - sizeof(struct record));
+		record->preference = preference;
+		memcpy(record->name, out, len);
+
+		e->iovec = malloc(sizeof(*e->iovec));
+		e->iovec->iov_base = record;
+		e->iovec->iov_len = len + sizeof(*record);
 		err = 0;
 	}
 

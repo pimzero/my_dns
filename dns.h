@@ -36,6 +36,12 @@ struct record {
 	char payload[0];
 } __packed;
 
+struct record_mx {
+	struct record record;
+	uint16_t preference;
+	char name[0];
+} __packed;
+
 struct dns_req {
 	uint16_t id;
 	uint16_t rd:1;
