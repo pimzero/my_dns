@@ -74,6 +74,35 @@ static int parse_line(const char* str, struct entry* e) {
 		e->iovec->iov_len = record_len;
 
 		err = 0;
+	} else if (!strcmp("TXT", s)) {
+		e->type = type_TXT;
+		s = strtok_r(NULL, delim, &saveptr);
+		e->name = strdup(s);
+		s = strtok_r(NULL, delim, &saveptr);
+		errno = 0;
+		uint32_t ttl = htonl(strtol(s, NULL, 0));
+		if (errno) {
+			perror("strtol");
+			return -1;
+		}
+		s = strtok_r(NULL, "", &saveptr);
+		if (s == NULL)
+			s = "";
+		size_t len = strlen(s);
+		if (len > 255) {
+			log(ERR, "Invalid TXT entry\n");
+			return -1;
+		}
+		e->count = 1;
+		struct record* record = malloc(len + 1 + sizeof(*record));
+		record->ttl = ttl;
+		record->len = htons(len + 1);
+		memcpy(record->payload + 1, s, len);
+		record->payload[0] = len;
+		e->iovec = malloc(sizeof(*e->iovec));
+		e->iovec->iov_base = record;
+		e->iovec->iov_len = len + 1 + sizeof(*record);
+		err = 0;
 	}
 
 	free(tmpstr);
