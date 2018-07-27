@@ -38,8 +38,11 @@ static int parse_line(const char* str, struct entry* e) {
 	char* tmpstr = strdup(str);
 	s = strtok_r(tmpstr, delim, &saveptr);
 
-	if (!strcmp("A", s)) {
-		e->type = type_A;
+	if (!strcmp("A", s) || !strcmp("AAAA", s)) {
+		if (!strcmp("A", s))
+			e->type = type_A;
+		else
+			e->type = type_AAAA;
 
 		s = strtok_r(NULL, delim, &saveptr);
 		e->name = strdup(s);
@@ -47,26 +50,23 @@ static int parse_line(const char* str, struct entry* e) {
 			return -1;
 
 		s = strtok_r(NULL, delim, &saveptr);
+		e->record_len = 4 + 2 + (e->type == type_A ? 4 : 16);
+		e->record = malloc(e->record_len + 14);
+
 		errno = 0;
-		long ttl_long = strtol(s, NULL, 0);
+		e->record->ttl = htonl(strtol(s, NULL, 0));
 		if (errno) {
 			perror("strtol");
 			return -1;
 		}
-		e->record = malloc(24);
+
 		if (!e->name)
 			return -1;
 
-		e->record_len = 4 + 2 + 4;
-
 		s = strtok_r(NULL, delim, &saveptr);
-		sscanf(s, "%hhd.%hhd.%hhd.%hhd",
-		       e->record->payload,
-		       e->record->payload + 1,
-		       e->record->payload + 2,
-		       e->record->payload + 3);
-		e->record->ttl = htonl(ttl_long);
-		e->record->len = htons(4);
+		inet_pton(e->type == type_A ? AF_INET : AF_INET6, s,
+			  e->record->payload);
+		e->record->len = htons(e->type == type_A ? 4 : 16);
 
 		err = 0;
 	}
