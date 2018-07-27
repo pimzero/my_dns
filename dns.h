@@ -21,6 +21,7 @@ enum type {
 	type_MX = 15,
 	type_TXT = 16,
 	type_AAAA = 28,
+	type_SRV = 33,
 };
 
 enum rcode {
@@ -52,7 +53,23 @@ struct dns_req {
 	char payload[0];
 } __packed;
 
-int find_record(enum type type, void* buf, size_t sze, struct iovec* value);
+struct dns_ans {
+	uint16_t name;
+	uint16_t type;
+	uint16_t class;
+	struct record val[0];
+} __packed;
+
+enum opcode {
+	opcode_QUERY = 0,
+};
+
+struct iovecgroup {
+	size_t iovlen;
+	struct iovec *iovec;
+};
+
+int find_record(enum type type, void* buf, size_t sze, struct iovecgroup* io);
 int backend_init(int argc, char** argv);
 int backend_reload(void);
 

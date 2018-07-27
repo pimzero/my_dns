@@ -3,6 +3,7 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
@@ -10,10 +11,6 @@
 #include <unistd.h>
 
 #include "dns.h"
-
-enum opcode {
-	opcode_QUERY = 0,
-};
 
 #define chk_err(X, MSG) do { if ((X)) { perror(MSG); exit(1); } } while (0)
 #define chk_warn(X, MSG) do { if ((X)) { perror(MSG); } } while (0)
@@ -41,13 +38,6 @@ int __weak backend_seccomp_rule(scmp_filter_ctx* ctx) {
 	return 0;
 }
 #endif
-
-struct dns_ans {
-	uint16_t name;
-	uint16_t type;
-	uint16_t class;
-	struct record val[0];
-} __packed;
 
 static int fd_tcp, fd_udp;
 
@@ -86,45 +76,52 @@ typedef int (*send_fn)(struct msghdr* msg, void* data);
 
 static int handle_QUERY(struct dns_req* rq, size_t sze, send_fn cb,
 			void* data) {
-	struct iovec iov[8];
-	struct msghdr msg = {
-		.msg_iov = iov,
-		.msg_iovlen = 0,
-	};
-
-	BACK(&msg) = IOV(rq, sze);
-
 	char* q = rq->payload;
-	while (*q) {
+	while (*q)
 		q += (unsigned int)*q + 1;
-	}
 	q++;
 	uint16_t type = ntohs(*(uint16_t*)q);
 	uint16_t class = ntohs(((uint16_t*)q)[1]);
 
 	sze = (4 + (char*)q) - ((char*)rq);
-	msg.msg_iov[0].iov_len = sze;
 
 	struct dns_ans ans;
 
 	rq->qr = 1;
 	rq->aa = 1;
 	rq->qdcount = ntohs(1);
-	rq->ancount = ntohs(1);
+	rq->ancount = ntohs(0);
 	rq->arcount = ntohs(0);
 
 	ans.name = htons(0xc000 | sizeof(struct dns_req));
 	ans.type = htons(type);
 	ans.class = htons(class);
-	BACK(&msg) = IOV(&ans, sizeof(ans));
-	rq->rcode = find_record(type, rq->payload, q - rq->payload, &BACK(&msg));
-#if 0
-	rq->rcode = 3; // XXX: nxerror but dig doesnt show it. Try wireshark ?
+	struct iovecgroup iogroup;
+	rq->rcode = find_record(type, rq->payload, q - rq->payload, &iogroup);
+	if (!rq->rcode && iogroup.iovlen >= 256)
+		rq->rcode = rcode_servfail;
+
+	if (!iogroup.iovlen)
+		rq->rcode = rcode_nxdomain;
+
 	if (rq->rcode) {
 		rq->ancount = ntohs(0);
 		rq->arcount = ntohs(0);
+
+		memset(&iogroup, 0, sizeof(iogroup));
 	}
-#endif
+	struct iovec iov[1 + iogroup.iovlen * 2];
+	struct msghdr msg = {
+		.msg_iov = iov,
+		.msg_iovlen = 0,
+	};
+	BACK(&msg) = IOV(rq, sze);
+	msg.msg_iov[0].iov_len = sze;
+	for (size_t i = 0; i < iogroup.iovlen; i++) {
+		BACK(&msg) = IOV(&ans, sizeof(ans));
+		BACK(&msg) = iogroup.iovec[i];
+		rq->ancount = htons(i + 1);
+	}
 
 	return cb(&msg, data);
 }

@@ -17,9 +17,9 @@
 
 struct entry {
 	enum type type;
-	uint16_t record_len;
+	uint16_t count;
 	char* name;
-	struct record* record;
+	struct iovec* iovec;
 } __packed;
 
 static struct {
@@ -50,11 +50,12 @@ static int parse_line(const char* str, struct entry* e) {
 			return -1;
 
 		s = strtok_r(NULL, delim, &saveptr);
-		e->record_len = 4 + 2 + (e->type == type_A ? 4 : 16);
-		e->record = malloc(e->record_len + 14);
+		size_t record_len = sizeof(struct record) +
+			            (e->type == type_A ? 4 : 16);
+		struct record* record = malloc(record_len + 14);
 
 		errno = 0;
-		e->record->ttl = htonl(strtol(s, NULL, 0));
+		record->ttl = htonl(strtol(s, NULL, 0));
 		if (errno) {
 			perror("strtol");
 			return -1;
@@ -65,8 +66,12 @@ static int parse_line(const char* str, struct entry* e) {
 
 		s = strtok_r(NULL, delim, &saveptr);
 		inet_pton(e->type == type_A ? AF_INET : AF_INET6, s,
-			  e->record->payload);
-		e->record->len = htons(e->type == type_A ? 4 : 16);
+			  record->payload);
+		record->len = htons(e->type == type_A ? 4 : 16);
+		e->count = 1;
+		e->iovec = malloc(sizeof(*e->iovec));
+		e->iovec->iov_base = record;
+		e->iovec->iov_len = record_len;
 
 		err = 0;
 	}
@@ -74,6 +79,33 @@ static int parse_line(const char* str, struct entry* e) {
 	free(tmpstr);
 	return err;
 }
+
+static int insert_entry(struct entry* e) {
+	for (size_t i = 0; i < entries.count; i++) {
+		if (entries.table[i].type == e->type &&
+		    !strcmp(entries.table[i].name, e->name)) {
+			struct entry* dst = &entries.table[i];
+			dst->count++;
+			dst->iovec = realloc(dst->iovec,
+					     dst->count * sizeof(struct iovec));
+			dst->iovec[dst->count-1].iov_base = e->iovec->iov_base;
+			dst->iovec[dst->count-1].iov_len = e->iovec->iov_len;
+
+			free(e->name);
+			free(e->iovec);
+
+			return 0;
+		}
+	}
+
+	entries.count++;
+	entries.table = realloc(entries.table,
+			entries.count * sizeof(*entries.table));
+	memcpy(&entries.table[entries.count - 1], e, sizeof(*e));
+	log(INFO, "XX%dXX\n", e->count);
+
+	return 0;
+};
 
 static int load_file(FILE* file) {
 	char *line = NULL;
@@ -87,14 +119,12 @@ static int load_file(FILE* file) {
 		if (*line == '#' || *line == '\0')
 			continue;
 
-		entries.count++;
-		entries.table = realloc(entries.table,
-					entries.count * sizeof(*entries.table));
-		memset(&entries.table[entries.count - 1], 0, sizeof(*entries.table));
-		if (parse_line(line, &entries.table[entries.count - 1]) < 0) {
+		struct entry entry = { 0 };
+		if (parse_line(line, &entry) < 0) {
 			log(ERR, "Could not parse line \"%s\"\n", line);
 			return - 1;
 		}
+		insert_entry(&entry);
 	}
 	free(line);
 
@@ -141,7 +171,9 @@ int backend_init(int argc, char** argv) {
 int backend_reload(void) {
 	for (size_t i = 0; i < entries.count; i++) {
 		free(entries.table[i].name);
-		free(entries.table[i].record);
+		for (size_t j = 0; j < entries.table[i].count; j++)
+			free(entries.table[i].iovec[j].iov_base);
+		free(entries.table[i].iovec);
 	}
 	entries.count = 0;
 	FILE* file = fopen(fname, "r");
@@ -174,6 +206,11 @@ static int record_to_str(char* out, size_t sze_out, void* in, size_t sze_in) {
 	if (sze_in > sze_out)
 		return -1;
 
+	if (!*(uint8_t*)in) {
+		out[0] = '.';
+		out[1] = '\0';
+	}
+
 	while (*(uint8_t*)in) {
 		struct {
 			uint8_t sze;
@@ -193,24 +230,25 @@ static int record_to_str(char* out, size_t sze_out, void* in, size_t sze_in) {
 	return 0;
 }
 
-int find_record(enum type type, void* buf, size_t sze, struct iovec* iov) {
+int find_record(enum type type, void* buf, size_t sze, struct iovecgroup* io) {
 	char name[256];
-	*iov = IOV(NULL, 0);
 	if (record_to_str(name, sizeof(name), buf, sze) < 0) {
 		log(ERR, "record_to_str failed\n");
 		return rcode_servfail;
 	}
 
+	io->iovlen = 0;
 	for (size_t i = 0; i < entries.count; i++) {
 		if (entries.table[i].type == type &&
 		    !strcasecmp(entries.table[i].name, name)) {
 			log(INFO, "Found: \"%s\"\n", name);
-			*iov = IOV(entries.table[i].record,
-				   entries.table[i].record_len);
+			io->iovlen = entries.table[i].count;
+			io->iovec = entries.table[i].iovec;
+			log(INFO, ">>%zu<<\n", io->iovlen);
 			break;
 		}
 	}
-	if (!iov->iov_base) {
+	if (!io->iovlen) {
 		log(INFO, "Not found: \"%s\" (%d)\n", name, type);
 		return rcode_nxdomain;
 	}
