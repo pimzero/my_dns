@@ -230,6 +230,7 @@ static int parse_line(char* str, struct entry* e) {
 	SET_TYPE(TXT);
 	SET_TYPE(CNAME);
 	SET_TYPE(SRV);
+	SET_TYPE(SOA);
 #undef SET_TYPE
 
 	s = strtok_r(NULL, " ", &saveptr);
@@ -255,6 +256,10 @@ static int parse_line(char* str, struct entry* e) {
 	} else if (e->type == type_SRV) {
 		enum parser_part parts[] = { part_U16, part_U16, part_U16,
 					     part_DOMAIN };
+		return parse_eval(parts, arrsze(parts), e, &saveptr);
+	} else if (e->type == type_SOA) {
+		enum parser_part parts[] = { part_DOMAIN, part_DOMAIN, part_U32, part_U32,
+					     part_U32, part_U32, part_U32 };
 		return parse_eval(parts, arrsze(parts), e, &saveptr);
 	}
 	log(ERR, "Unknown type\n");
