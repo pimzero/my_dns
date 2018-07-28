@@ -228,6 +228,7 @@ static int parse_line(char* str, struct entry* e) {
 	SET_TYPE(AAAA);
 	SET_TYPE(MX);
 	SET_TYPE(TXT);
+	SET_TYPE(CNAME);
 #undef SET_TYPE
 
 	s = strtok_r(NULL, " ", &saveptr);
@@ -246,6 +247,9 @@ static int parse_line(char* str, struct entry* e) {
 		return parse_eval(parts, arrsze(parts), e, &saveptr);
 	} else if (e->type == type_MX) {
 		enum parser_part parts[] = { part_U16, part_DOMAIN };
+		return parse_eval(parts, arrsze(parts), e, &saveptr);
+	} else if (e->type == type_CNAME) {
+		enum parser_part parts[] = { part_DOMAIN };
 		return parse_eval(parts, arrsze(parts), e, &saveptr);
 	}
 	log(ERR, "Unknown type\n");
