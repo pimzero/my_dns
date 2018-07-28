@@ -29,137 +29,227 @@ static struct {
 
 const char* fname;
 
-static int parse_line(const char* str, struct entry* e) {
-	char* saveptr = NULL;
-	char* s;
-	char* delim = " ";
+struct parse_elt {
+	size_t sze;
+	void* data;
+};
 
-	int err = -1;
-	char* tmpstr = strdup(str);
-	s = strtok_r(tmpstr, delim, &saveptr);
+static struct parse_elt parse_U16(char** saveptr) {
+	struct parse_elt out = { 0 };
+	errno = 0;
+	uint16_t* i = malloc(sizeof(*i));
+	char* s = strtok_r(NULL, " ", saveptr);
+	*i = htonl(strtol(s, NULL, 0));
+	if (errno) {
+		perror("strtol");
+		return out;
+	}
+	out.sze = sizeof(*i);
+	out.data = i;
 
-	if (!strcasecmp("A", s) || !strcasecmp("AAAA", s)) {
-		if (!strcmp("A", s))
-			e->type = type_A;
-		else
-			e->type = type_AAAA;
+	return out;
+}
 
-		s = strtok_r(NULL, delim, &saveptr);
-		e->name = strdup(s);
-		if (!e->name)
-			return -1;
+static struct parse_elt parse_U32(char** saveptr) {
+	struct parse_elt out = { 0 };
+	errno = 0;
+	uint32_t* i = malloc(sizeof(*i));
+	char* s = strtok_r(NULL, " ", saveptr);
+	*i = htonl(strtol(s, NULL, 0));
+	if (errno) {
+		perror("strtol");
+		return out;
+	}
+	out.sze = sizeof(*i);
+	out.data = i;
 
-		s = strtok_r(NULL, delim, &saveptr);
-		size_t record_len = sizeof(struct record) +
-			            (e->type == type_A ? 4 : 16);
-		struct record* record = malloc(record_len + 14);
+	return out;
+}
 
-		errno = 0;
-		record->ttl = htonl(strtol(s, NULL, 0));
-		if (errno) {
-			perror("strtol");
-			return -1;
-		}
+static struct parse_elt parse_IPV4(char** saveptr) {
+	struct parse_elt out = { 0 };
+	out.sze = 4;
+	out.data = malloc(out.sze);
 
-		if (!e->name)
-			return -1;
-
-		s = strtok_r(NULL, delim, &saveptr);
-		inet_pton(e->type == type_A ? AF_INET : AF_INET6, s,
-			  record->payload);
-		record->len = htons(e->type == type_A ? 4 : 16);
-		e->count = 1;
-		e->iovec = malloc(sizeof(*e->iovec));
-		e->iovec->iov_base = record;
-		e->iovec->iov_len = record_len;
-
-		err = 0;
-	} else if (!strcasecmp("TXT", s)) {
-		e->type = type_TXT;
-		s = strtok_r(NULL, delim, &saveptr);
-		e->name = strdup(s);
-		s = strtok_r(NULL, delim, &saveptr);
-		errno = 0;
-		uint32_t ttl = htonl(strtol(s, NULL, 0));
-		if (errno) {
-			perror("strtol");
-			return -1;
-		}
-		s = strtok_r(NULL, "", &saveptr);
-		if (s == NULL)
-			s = "";
-		size_t len = strlen(s);
-		if (len > 255) {
-			log(ERR, "Invalid TXT entry\n");
-			return -1;
-		}
-		e->count = 1;
-		struct record* record = malloc(len + 1 + sizeof(*record));
-		record->ttl = ttl;
-		record->len = htons(len + 1);
-		memcpy(record->payload + 1, s, len);
-		record->payload[0] = len;
-		e->iovec = malloc(sizeof(*e->iovec));
-		e->iovec->iov_base = record;
-		e->iovec->iov_len = len + 1 + sizeof(*record);
-		err = 0;
-	} else if (!strcasecmp("MX", s)) {
-		e->type = type_MX;
-		s = strtok_r(NULL, delim, &saveptr);
-		e->name = strdup(s);
-		s = strtok_r(NULL, delim, &saveptr);
-		errno = 0;
-		uint32_t ttl = htonl(strtol(s, NULL, 0));
-		if (errno) {
-			perror("strtol");
-			return -1;
-		}
-		s = strtok_r(NULL, delim, &saveptr);
-		errno = 0;
-		uint16_t preference = htons(strtol(s, NULL, 0));
-		if (errno) {
-			perror("strtol");
-			return -1;
-		}
-		s = strtok_r(NULL, "", &saveptr);
-		if (s == NULL)
-			s = "";
-		size_t len = strlen(s);
-		if (len > 255) {
-			log(ERR, "Invalid MX entry\n");
-			return -1;
-		}
-		char* out = malloc(len + 2);
-		char* saveptr2 = NULL;
-		s = strtok_r(s, ".", &saveptr2);
-		if (!s)
-			s = "";
-		if (strlen(s) == 0)
-			len--;
-		char* cur = out;
-		do {
-			*cur = strlen(s);
-			strcpy(cur + 1, s);
-			cur += *cur + 1;
-			*cur = 0;
-		} while (s = strtok_r(NULL, ".", &saveptr2));
-
-		e->count = 1;
-		len++;
-		struct record_mx* record = malloc(len + sizeof(*record));
-		record->record.ttl = ttl;
-		record->record.len = htons(len + sizeof(*record) - sizeof(struct record));
-		record->preference = preference;
-		memcpy(record->name, out, len);
-
-		e->iovec = malloc(sizeof(*e->iovec));
-		e->iovec->iov_base = record;
-		e->iovec->iov_len = len + sizeof(*record);
-		err = 0;
+	char* s = strtok_r(NULL, " ", saveptr);
+	if (!s)
+		s = "";
+	if (inet_pton(AF_INET, s, out.data) != 1) {
+		log(ERR, "inet_pton failed (ipv4) \"%s\"\n", s);
+		free(out.data);
+		out.data = NULL;
 	}
 
-	free(tmpstr);
-	return err;
+	return out;
+}
+
+static struct parse_elt parse_IPV6(char** saveptr) {
+	struct parse_elt out = { 0 };
+	out.sze = 16;
+	out.data = malloc(out.sze);
+
+	char* s = strtok_r(NULL, " ", saveptr);
+	if (!s)
+		s = "";
+	if (inet_pton(AF_INET6, s, out.data) != 1) {
+		log(ERR, "inet_pton failed (ipv4)\n");
+		free(out.data);
+		out.data = NULL;
+	}
+
+	return out;
+}
+
+static struct parse_elt parse_TXT(char** saveptr) {
+	struct parse_elt out = { 0 };
+
+	char* s = strtok_r(NULL, "", saveptr);
+	if (!s)
+		s = "";
+	size_t sze = strlen(s);
+	if (sze > 255) {
+		log(ERR, "TXT: string to long\n");
+		out.data = NULL;
+		return out;
+	}
+	out.sze = sze + 1;
+	out.data = malloc(out.sze + 1);
+	((char*)out.data)[0] = sze;
+	memcpy(((char*)out.data) + 1, s, sze);
+
+	return out;
+}
+
+static struct parse_elt parse_DOMAIN(char** saveptr) {
+	struct parse_elt out = { 0 };
+
+	char* s = strtok_r(NULL, " ", saveptr);
+	if (s == NULL)
+		s = "";
+	size_t len = strlen(s);
+	if (len > 255) {
+		log(ERR, "Domain too long\n");
+		return out;
+	}
+	 out.data = malloc(len + 2);
+	char* saveptr2 = NULL;
+	s = strtok_r(s, ".", &saveptr2);
+	if (!s)
+		s = "";
+	if (strlen(s) == 0)
+		len--;
+	char* cur = out.data;
+	do {
+		*cur = strlen(s);
+		strcpy(cur + 1, s);
+		cur += *cur + 1;
+		*cur = 0;
+	} while ((s = strtok_r(NULL, ".", &saveptr2)));
+	out.sze = len + 1;
+
+	return out;
+}
+
+#define arrsze(X) (sizeof(X) / sizeof(*(X)))
+
+enum parser_part {
+	part_U16,
+	part_U32,
+	part_IPV4,
+	part_IPV6,
+	part_TXT,
+	part_DOMAIN,
+};
+
+static int parse_eval(enum parser_part* p, size_t sze, struct entry* e,
+		      char** saveptr) {
+	size_t record_len = 0;
+	struct parse_elt pe[sze];
+	struct parse_elt (*f_arr[])(char**) = {
+#if 1
+#define X(X) [part_##X] = parse_##X
+		X(U16),
+		X(U32),
+		X(IPV4),
+		X(IPV6),
+		X(TXT),
+		X(DOMAIN),
+#undef X
+#endif
+	};
+	struct parse_elt ttl = parse_U32(saveptr);
+	if (!ttl.data)
+		return -1;
+	for (size_t i = 0; i < arrsze(pe); i++)
+		pe[i] = f_arr[p[i]](saveptr);
+	char* still_to_read = strtok_r(NULL, "", saveptr);
+	if (still_to_read) {
+		log(ERR, "Too much for record: \"%s\"\n", still_to_read);
+		return -1;
+	}
+	for (size_t i = 0; i < arrsze(pe); i++) {
+		if (!pe[i].data)
+			return -1;
+		record_len += pe[i].sze;
+	}
+
+	struct record* record = malloc(record_len + sizeof(*record));
+
+	size_t pos = 0;
+	for (size_t i = 0; i < arrsze(pe); i++) {
+		memcpy(&record->payload[pos], pe[i].data, pe[i].sze);
+		pos += pe[i].sze;
+		free(pe[i].data);
+	}
+
+	if (!e->name)
+		return -1;
+
+	record->ttl = *(uint32_t*)ttl.data;
+	free(ttl.data);
+	record->len = htons(record_len);
+	e->count = 1;
+	e->iovec = malloc(sizeof(*e->iovec));
+	e->iovec->iov_base = record;
+	e->iovec->iov_len = record_len + sizeof(*record);
+
+	return 0;
+}
+
+static int parse_line(char* str, struct entry* e) {
+	char* saveptr = NULL;
+	char* s;
+
+	s = strtok_r(str, " ", &saveptr);
+
+	e->type = -1;
+#define SET_TYPE(X) do { if (!strcasecmp(#X, s)) e->type = type_##X; } while (0)
+	SET_TYPE(A);
+	SET_TYPE(AAAA);
+	SET_TYPE(MX);
+	SET_TYPE(TXT);
+#undef SET_TYPE
+
+	s = strtok_r(NULL, " ", &saveptr);
+	e->name = strdup(s);
+	if (!e->name)
+		return -1;
+
+	if (e->type == type_A) {
+		enum parser_part parts[] = { part_IPV4 };
+		return parse_eval(parts, arrsze(parts), e, &saveptr);
+	} else if (e->type == type_AAAA) {
+		enum parser_part parts[] = { part_IPV6 };
+		return parse_eval(parts, arrsze(parts), e, &saveptr);
+	} else if (e->type == type_TXT) {
+		enum parser_part parts[] = { part_TXT };
+		return parse_eval(parts, arrsze(parts), e, &saveptr);
+	} else if (e->type == type_MX) {
+		enum parser_part parts[] = { part_U16, part_DOMAIN };
+		return parse_eval(parts, arrsze(parts), e, &saveptr);
+	}
+	log(ERR, "Unknown type\n");
+	return -1;
 }
 
 static int insert_entry(struct entry* e) {
@@ -184,7 +274,6 @@ static int insert_entry(struct entry* e) {
 	entries.table = realloc(entries.table,
 			entries.count * sizeof(*entries.table));
 	memcpy(&entries.table[entries.count - 1], e, sizeof(*e));
-	log(INFO, "XX%dXX\n", e->count);
 
 	return 0;
 };
@@ -202,10 +291,12 @@ static int load_file(FILE* file) {
 			continue;
 
 		struct entry entry = { 0 };
-		if (parse_line(line, &entry) < 0) {
+		char* tmpline = strdup(line);
+		if (parse_line(tmpline, &entry) < 0) {
 			log(ERR, "Could not parse line \"%s\"\n", line);
 			return - 1;
 		}
+		free(tmpline);
 		insert_entry(&entry);
 	}
 	free(line);
@@ -326,7 +417,6 @@ int find_record(enum type type, void* buf, size_t sze, struct iovecgroup* io) {
 			log(INFO, "Found: \"%s\"\n", name);
 			io->iovlen = entries.table[i].count;
 			io->iovec = entries.table[i].iovec;
-			log(INFO, ">>%zu<<\n", io->iovlen);
 			break;
 		}
 	}
