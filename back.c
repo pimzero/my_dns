@@ -39,7 +39,7 @@ static struct parse_elt parse_U16(char** saveptr) {
 	errno = 0;
 	uint16_t* i = malloc(sizeof(*i));
 	char* s = strtok_r(NULL, " ", saveptr);
-	*i = htonl(strtol(s, NULL, 0));
+	*i = htons(strtol(s, NULL, 0));
 	if (errno) {
 		perror("strtol");
 		return out;
@@ -229,6 +229,7 @@ static int parse_line(char* str, struct entry* e) {
 	SET_TYPE(MX);
 	SET_TYPE(TXT);
 	SET_TYPE(CNAME);
+	SET_TYPE(SRV);
 #undef SET_TYPE
 
 	s = strtok_r(NULL, " ", &saveptr);
@@ -250,6 +251,10 @@ static int parse_line(char* str, struct entry* e) {
 		return parse_eval(parts, arrsze(parts), e, &saveptr);
 	} else if (e->type == type_CNAME) {
 		enum parser_part parts[] = { part_DOMAIN };
+		return parse_eval(parts, arrsze(parts), e, &saveptr);
+	} else if (e->type == type_SRV) {
+		enum parser_part parts[] = { part_U16, part_U16, part_U16,
+					     part_DOMAIN };
 		return parse_eval(parts, arrsze(parts), e, &saveptr);
 	}
 	log(ERR, "Unknown type\n");
