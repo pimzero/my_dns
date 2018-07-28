@@ -232,6 +232,7 @@ static int parse_line(char* str, struct entry* e) {
 	SET_TYPE(SRV);
 	SET_TYPE(SOA);
 	SET_TYPE(PTR);
+	SET_TYPE(NS);
 #undef SET_TYPE
 
 	s = strtok_r(NULL, " ", &saveptr);
@@ -259,10 +260,14 @@ static int parse_line(char* str, struct entry* e) {
 					     part_DOMAIN };
 		return parse_eval(parts, arrsze(parts), e, &saveptr);
 	} else if (e->type == type_SOA) {
-		enum parser_part parts[] = { part_DOMAIN, part_DOMAIN, part_U32, part_U32,
-					     part_U32, part_U32, part_U32 };
+		enum parser_part parts[] = { part_DOMAIN, part_DOMAIN, part_U32,
+					     part_U32, part_U32, part_U32,
+					     part_U32 };
 		return parse_eval(parts, arrsze(parts), e, &saveptr);
 	} else if (e->type == type_PTR) {
+		enum parser_part parts[] = { part_DOMAIN };
+		return parse_eval(parts, arrsze(parts), e, &saveptr);
+	} else if (e->type == type_NS) {
 		enum parser_part parts[] = { part_DOMAIN };
 		return parse_eval(parts, arrsze(parts), e, &saveptr);
 	}
