@@ -93,7 +93,7 @@ static void init_sockets() {
 }
 
 static int epoll_add(int epollfd, int fd, int events) {
-	struct epoll_event ev = { };
+	struct epoll_event ev = { 0 };
 	ev.events = events;
 	ev.data.fd = fd;
 	return epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev);

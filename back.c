@@ -13,8 +13,6 @@
 
 #define log(X, ...) LOG(X, "backend: " __VA_ARGS__);
 
-#define IP(A, B, C, D) ((A) | ((B) << 8) | ((C) << 16) | ((D) << 24))
-
 struct entry {
 	enum type type;
 	uint16_t count;
@@ -27,7 +25,7 @@ static struct {
 	size_t count;
 } entries;
 
-const char* fname;
+static const char* fname;
 
 struct parse_elt {
 	size_t sze;
@@ -299,7 +297,7 @@ static int insert_entry(struct entry* e) {
 	memcpy(&entries.table[entries.count - 1], e, sizeof(*e));
 
 	return 0;
-};
+}
 
 static int load_file(FILE* file) {
 	char *line = NULL;
@@ -398,53 +396,21 @@ int backend_seccomp_rule(scmp_filter_ctx* ctx) {
 }
 #endif
 
-static int record_to_str(char* out, size_t sze_out, void* in, size_t sze_in) {
-	if (sze_in > sze_out)
-		return -1;
-
-	if (!*(uint8_t*)in) {
-		out[0] = '.';
-		out[1] = '\0';
-	}
-
-	while (*(uint8_t*)in) {
-		struct {
-			uint8_t sze;
-			char data[0];
-		} __packed *cur = in;
-
-		if (cur->sze + 1 > sze_out)
-			return -1;
-
-		memcpy(out, cur->data, cur->sze);
-		sze_out -= cur->sze + 1;
-		out[cur->sze] = '.';
-		out += cur->sze + 1;
-		in += cur->sze + 1;
-		*out = 0;
-	}
-	return 0;
-}
-
 int find_record(enum type type, void* buf, size_t sze, struct iovecgroup* io) {
-	char name[256];
-	if (record_to_str(name, sizeof(name), buf, sze) < 0) {
-		log(ERR, "record_to_str failed\n");
-		return rcode_servfail;
-	}
-
 	io->iovlen = 0;
 	for (size_t i = 0; i < entries.count; i++) {
 		if (entries.table[i].type == type &&
 		    !strncasecmp(entries.table[i].name, buf, sze)) {
-			log(INFO, "Found: \"%s\"\n", name);
+			log(INFO, "Found: \"%.*s\" (%d)\n", (int)sze,
+			    (char*)buf, type);
 			io->iovlen = entries.table[i].count;
 			io->iovec = entries.table[i].iovec;
 			break;
 		}
 	}
 	if (!io->iovlen) {
-		log(INFO, "Not found: \"%s\" (%d)\n", name, type);
+		log(INFO, "Not found: \"%.*s\" (%d)\n", (int)sze, (char*)buf,
+		    type);
 		return rcode_nxdomain;
 	}
 	return rcode_ok;
