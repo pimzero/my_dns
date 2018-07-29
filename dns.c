@@ -10,6 +10,13 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#ifdef USE_BPF
+#ifdef USE_TCP
+#error No support of TCP + BPF
+#endif
+#include <linux/filter.h>
+#endif
+
 #include "dns.h"
 
 #define chk_err(X, MSG) do { if ((X)) { perror(MSG); exit(1); } } while (0)
@@ -39,7 +46,10 @@ int __weak backend_seccomp_rule(scmp_filter_ctx* ctx) {
 }
 #endif
 
-static int fd_tcp, fd_udp;
+static int fd_udp;
+#ifdef USE_TCP
+static int fd_tcp;
+#endif
 
 static void init_sockets() {
 	int optval = 1;
@@ -59,10 +69,27 @@ static void init_sockets() {
 	chk_err(bind(fd_##T, sa, sizeof(saddr)) < 0, "bind(" #T ")"); \
 	} while (0)
 	init_sock(udp, SOCK_DGRAM);
+
+#ifdef USE_TCP
 	init_sock(tcp, SOCK_STREAM);
+	chk_err(listen(fd_tcp, 0) < 0, "listen(tcp)");
+#endif
 #undef init_sock
 
-	chk_err(listen(fd_tcp, 0) < 0, "listen(tcp)");
+#ifdef USE_BPF
+	LOG(INFO, "BPF: Loading\n");
+	struct sock_filter filter_udp[] = {
+#include "bpf_udp.inc"
+	};
+	struct sock_fprog bpf_udp = {
+		.len = arrsze(filter_udp),
+		.filter = filter_udp,
+	};
+	chk_err(setsockopt(fd_udp, SOL_SOCKET, SO_ATTACH_FILTER, &bpf_udp,
+			   sizeof(bpf_udp)) < 0, "setsockopt(udp, bpf)");
+	// SO_LOCK_FILTER
+	LOG(INFO, "BPF: Loaded\n");
+#endif
 }
 
 static int epoll_add(int epollfd, int fd, int events) {
@@ -156,6 +183,7 @@ static int reply_udp(struct msghdr* msg, void* data) {
 	return out;
 }
 
+#ifdef USE_TCP
 static int reply_tcp(struct msghdr* msg, void* data) {
 	int fd = *(int*)data;
 
@@ -173,6 +201,7 @@ static int reply_tcp(struct msghdr* msg, void* data) {
 	chk_warn(close(fd) < 0, "close(reply_tcp)");
 	return out;
 }
+#endif
 
 static char* buf2hex(char* out, size_t outsze, const char* in, size_t insze) {
 	for (size_t i = 0; i < insze && i * 2 < outsze; i++)
@@ -180,6 +209,8 @@ static char* buf2hex(char* out, size_t outsze, const char* in, size_t insze) {
 	return out;
 }
 
+#define IP_BYTES(X) ((uint8_t*)&(((struct sockaddr_in*)(X))->sin_addr.s_addr))
+#ifdef USE_TCP
 static void log_tcp(int fd) {
 	union {
 		struct sockaddr sockaddr;
@@ -190,7 +221,6 @@ static void log_tcp(int fd) {
 	chk_warn(getpeername(fd, &sockaddr.sockaddr, &len) < 0,
 		 "getpeername");
 
-#define IP_BYTES(X) ((uint8_t*)&(((struct sockaddr_in*)(X))->sin_addr.s_addr))
 	LOG(INFO, "tcp msg from: %hhu.%hhu.%hhu.%hhu:%hu (family:%d)\n",
 	     IP_BYTES(&sockaddr)[0],
 	     IP_BYTES(&sockaddr)[1],
@@ -199,6 +229,7 @@ static void log_tcp(int fd) {
 	     sockaddr.in.sin_port,
 	     sockaddr.sockaddr.sa_family);
 }
+#endif
 
 static void dns_iter(int fd) {
 	char buf[1024];
@@ -211,7 +242,10 @@ static void dns_iter(int fd) {
 	} data;
 	send_fn fn;
 
-	if (fd == fd_udp) {
+#ifdef USE_TCP
+	if (fd == fd_udp)
+#endif
+	{
 		data.udp.saddrlen = sizeof(data.udp.saddr);
 		data.udp.fd = fd_udp;
 		sze = recvfrom(fd_udp, buf, sizeof(buf), MSG_DONTWAIT,
@@ -225,7 +259,9 @@ static void dns_iter(int fd) {
 			  IP_BYTES(&data.udp.saddr)[3],
 			  ((struct sockaddr_in*)&data.udp.saddr)->sin_port,
 			  data.udp.saddr.sa_family);
-	} else {
+	}
+#ifdef USE_TCP
+	else {
 		sze = recv(fd, buf, sizeof(buf), 0);
 		chk_warn(sze < 0, "recv");
 		sze = ntohs(*(uint16_t*)buf);
@@ -234,6 +270,7 @@ static void dns_iter(int fd) {
 		fn = reply_tcp;
 		log_tcp(fd);
 	}
+#endif
 
 	char hexbuf[sze * 2 + 1];
 	LOG(INFO, "msg received (%s): \"%s\"\n", fd == fd_udp ? "udp" : "tcp",
@@ -242,11 +279,13 @@ static void dns_iter(int fd) {
 	chk_warn(handle_msg((void*)ptr, sze, fn, &data) < 0, "handle_msg");
 }
 
+#ifdef USE_TCP
 static void dns_new_tcp(int efd) {
 	int afd = accept(fd_tcp, NULL, 0);
 	chk_warn(afd < 0, "accept");
 	chk_warn(epoll_add(efd, afd, EPOLLIN|EPOLLET) < 0, "epoll_add");
 }
+#endif
 
 static void dns_loop(int efd) {
 	struct epoll_event ev[16];
@@ -256,9 +295,11 @@ static void dns_loop(int efd) {
 	chk_err(nfds < 0, "epoll_wait");
 
 	for (int i = 0; i < nfds; i++) {
+#ifdef USE_TCP
 		if (ev[i].data.fd == fd_tcp)
 			dns_new_tcp(efd);
 		else
+#endif
 			dns_iter(ev[i].data.fd);
 	}
 }
@@ -281,8 +322,10 @@ int main(int argc, char** argv) {
 	int efd = epoll_create1(0);
 	chk_err(efd < 0, "epoll_create1");
 
-	chk_err(epoll_add(efd, fd_tcp, EPOLLIN) < 0, "epoll_add");
 	chk_err(epoll_add(efd, fd_udp, EPOLLIN) < 0, "epoll_add");
+#ifdef USE_TCP
+	chk_err(epoll_add(efd, fd_tcp, EPOLLIN) < 0, "epoll_add");
+#endif
 
 #ifdef USE_SECCOMP
 	scmp_filter_ctx ctx;

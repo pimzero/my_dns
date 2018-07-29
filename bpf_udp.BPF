@@ -1,0 +1,407 @@
+ldh      [4]
+jge      #0x0200, fail
+
+// ancount == 0 && nscount == 0
+ld [14]
+jne #0, fail
+
+ldh [10]
+and #0xff00
+jne #0x0100, fail
+
+// Currently we handle only one query
+ldh [12]
+jne #1, fail
+
+ldx #20
+ldb [x + 0]
+jeq #0, domain_ok
+
+// 63 times check end of domain + forward
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+add x
+add #1
+tax
+ldb[x + 0]
+jeq #0, domain_ok
+
+// End of domain check
+
+jmp fail
+
+domain_ok:
+// Check class == IN
+ldh [x + 2]
+jne #0001, fail
+
+success:
+ret      #0xffff
+
+fail:
+ret      #0
