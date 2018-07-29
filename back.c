@@ -235,10 +235,10 @@ static int parse_line(char* str, struct entry* e) {
 	SET_TYPE(NS);
 #undef SET_TYPE
 
-	s = strtok_r(NULL, " ", &saveptr);
-	e->name = strdup(s);
-	if (!e->name)
+	struct parse_elt domain_elt = parse_DOMAIN(&saveptr);
+	if (!domain_elt.data)
 		return -1;
+	e->name = domain_elt.data;
 
 	if (e->type == type_A) {
 		enum parser_part parts[] = { part_IPV4 };
@@ -436,7 +436,7 @@ int find_record(enum type type, void* buf, size_t sze, struct iovecgroup* io) {
 	io->iovlen = 0;
 	for (size_t i = 0; i < entries.count; i++) {
 		if (entries.table[i].type == type &&
-		    !strcasecmp(entries.table[i].name, name)) {
+		    !strncasecmp(entries.table[i].name, buf, sze)) {
 			log(INFO, "Found: \"%s\"\n", name);
 			io->iovlen = entries.table[i].count;
 			io->iovec = entries.table[i].iovec;
