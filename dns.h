@@ -42,6 +42,11 @@ struct record_mx {
 	char name[0];
 } __packed;
 
+struct subdomain {
+	uint8_t sze;
+	char data[0];
+} __packed;
+
 struct dns_req {
 	uint16_t id;
 	uint16_t rd:1;
@@ -56,7 +61,10 @@ struct dns_req {
 	uint16_t ancount;
 	uint16_t nscount;
 	uint16_t arcount;
-	char payload[0];
+	union {
+		char payload[0];
+		struct subdomain q[0];
+	};
 } __packed;
 
 struct dns_ans {
@@ -68,6 +76,10 @@ struct dns_ans {
 
 enum opcode {
 	opcode_QUERY = 0,
+};
+
+enum dns_class {
+	class_IN = 0x0001,
 };
 
 struct iovecgroup {

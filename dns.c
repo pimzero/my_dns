@@ -103,16 +103,10 @@ typedef int (*send_fn)(struct msghdr* msg, void* data);
 
 static int handle_QUERY(struct dns_req* rq, size_t sze, send_fn cb,
 			void* data) {
-	char* q = rq->payload;
-	while (*q)
-		q += (unsigned int)*q + 1;
-	q++;
-	uint16_t type = ntohs(*(uint16_t*)q);
-	uint16_t class = ntohs(((uint16_t*)q)[1]);
-
-	sze = (4 + (char*)q) - ((char*)rq);
-
-	struct dns_ans ans;
+	struct dns_ans ans = { 0 };
+	struct iovecgroup iogroup = { 0 };
+	struct subdomain* q = rq->q;
+	size_t q_sze = 0;
 
 	rq->qr = 1;
 	rq->aa = 1;
@@ -120,11 +114,32 @@ static int handle_QUERY(struct dns_req* rq, size_t sze, send_fn cb,
 	rq->ancount = ntohs(0);
 	rq->arcount = ntohs(0);
 
+	while (q->sze) {
+		if ((size_t)(((char*)q) - ((char*)rq)) >= sze) {
+			LOG(WARN, "Domain name longer than packet\n");
+			rq->rcode = rcode_servfail;
+			goto teardown;
+		}
+		q += q->sze + 1;
+	}
+	q++;
+	uint16_t type = ntohs(*(uint16_t*)q);
+	uint16_t class = ntohs(((uint16_t*)q)[1]);
+	if (class != class_IN) {
+		LOG(WARN, "Unsupported class \"%u\"\n", class);
+		rq->rcode = rcode_servfail;
+		goto teardown;
+	}
+
+	sze = (4 + (char*)q) - ((char*)rq);
+
 	ans.name = htons(0xc000 | sizeof(struct dns_req));
 	ans.type = htons(type);
 	ans.class = htons(class);
-	struct iovecgroup iogroup;
-	rq->rcode = find_record(type, rq->payload, q - rq->payload, &iogroup);
+	q_sze = (char*)q - rq->payload;
+	rq->rcode = find_record(type, rq->payload, q_sze, &iogroup);
+
+teardown:
 	if (!rq->rcode && iogroup.iovlen >= 256)
 		rq->rcode = rcode_servfail;
 
@@ -160,6 +175,11 @@ static int handle_msg(struct dns_req* rq, size_t sze, send_fn cb, void* data) {
 #undef X
 	};
 
+	if (sze < sizeof(*rq)) {
+		LOG(WARN, "Packet too small for struct dns_req\n");
+		return cb(NULL, data);
+	}
+
 	if (rq->op >= arrsze(opcode_handler) || !opcode_handler[rq->op]) {
 		LOG(INFO, "unknown opcode \"%d\"\n", rq->op);
 		return -1;
@@ -174,6 +194,9 @@ struct data_udp {
 };
 
 static int reply_udp(struct msghdr* msg, void* data) {
+	if (!msg)
+		return 0;
+
 	struct data_udp* d = data;
 	msg->msg_name = &d->saddr;
 	msg->msg_namelen = d->saddrlen;
@@ -186,24 +209,27 @@ static int reply_udp(struct msghdr* msg, void* data) {
 #ifdef USE_TCP
 static int reply_tcp(struct msghdr* msg, void* data) {
 	int fd = *(int*)data;
+	int out = 0;
+	if (msg) {
+		size_t len = 0;
+		for (size_t i = 0; i < msg->msg_iovlen; i++)
+			len += msg->msg_iov[i].iov_len;
 
-	size_t len = 0;
-	for (size_t i = 0; i < msg->msg_iovlen; i++)
-		len += msg->msg_iov[i].iov_len;
+		msg->msg_iov[0].iov_base -= 2;
+		msg->msg_iov[0].iov_len += 2;
 
-	msg->msg_iov[0].iov_base -= 2;
-	msg->msg_iov[0].iov_len += 2;
+		*(uint16_t*)msg->msg_iov->iov_base = htons(len);
 
-	*(uint16_t*)msg->msg_iov->iov_base = htons(len);
-
-	int out = sendmsg(fd, msg, 0);
-	chk_warn(out < 0, "sendmsg(reply_tcp)");
+		out = sendmsg(fd, msg, 0);
+		chk_warn(out < 0, "sendmsg(reply_tcp)");
+	}
 	chk_warn(close(fd) < 0, "close(reply_tcp)");
 	return out;
 }
 #endif
 
 static char* buf2hex(char* out, size_t outsze, const char* in, size_t insze) {
+	out[0] = 0;
 	for (size_t i = 0; i < insze && i * 2 < outsze; i++)
 		sprintf(out + i * 2, "%02hhx", in[i]);
 	return out;
@@ -234,7 +260,7 @@ static void log_tcp(int fd) {
 static void dns_iter(int fd) {
 	char buf[1024];
 	char* ptr = buf;
-	ssize_t sze;
+	ssize_t sze = 0;
 
 	union {
 		struct data_udp udp;
@@ -264,8 +290,16 @@ static void dns_iter(int fd) {
 	else {
 		sze = recv(fd, buf, sizeof(buf), 0);
 		chk_warn(sze < 0, "recv");
-		sze = ntohs(*(uint16_t*)buf);
-		ptr += 2;
+		if (sze >= 2) {
+			ssize_t sze_tmp = ntohs(*(uint16_t*)buf);
+			ptr += 2;
+			if (sze_tmp > sze)
+				sze = 0;
+			else
+				sze = sze_tmp;
+		} else {
+			sze = 0;
+		}
 		data.fd = fd;
 		fn = reply_tcp;
 		log_tcp(fd);
@@ -326,6 +360,8 @@ int main(int argc, char** argv) {
 #ifdef USE_TCP
 	chk_err(epoll_add(efd, fd_tcp, EPOLLIN) < 0, "epoll_add");
 #endif
+
+	// TODO: Drop capabilities
 
 #ifdef USE_SECCOMP
 	scmp_filter_ctx ctx;
