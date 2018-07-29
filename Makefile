@@ -3,8 +3,9 @@ CPPFLAGS=
 CPPFLAGS+=-DUSE_TCP
 CPPFLAGS+=-DUSE_SECCOMP
 #CPPFLAGS+=-DUSE_BPF
+BACKEND_OBJ?=backend_config.o
 CFLAGS=-Wall -Wextra
-OBJS=dns.o back.o
+OBJS=dns.o $(BACKEND_OBJ)
 BIN=dns
 
 $(BIN): $(OBJS)

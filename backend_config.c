@@ -129,7 +129,7 @@ static struct parse_elt parse_DOMAIN(char** saveptr) {
 		log(ERR, "Domain too long\n");
 		return out;
 	}
-	 out.data = malloc(len + 2);
+	out.data = malloc(len + 2);
 	char* saveptr2 = NULL;
 	s = strtok_r(s, ".", &saveptr2);
 	if (!s)
