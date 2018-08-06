@@ -348,8 +348,17 @@ static void sighup_handler(int s) {
 }
 
 int main(int argc, char** argv) {
+	int dry_run = 0;
+	if (argc >= 2 && !strcmp(argv[1], "--dry-run")) {
+		dry_run = 1;
+		argc--;
+		argv++;
+	}
 	if (backend_init(argc, argv) < 0)
 		return 1;
+
+	if (dry_run)
+		return 0;
 
 	signal(SIGHUP, sighup_handler);
 

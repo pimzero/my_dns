@@ -32,11 +32,18 @@ struct parse_elt {
 	void* data;
 };
 
+static char* strtoknul_r(char* str, const char* delim, char** saveptr) {
+	char* out = strtok_r(str, delim, saveptr);
+	if (!out)
+		return "";
+	return out;
+}
+
 static struct parse_elt parse_U16(char** saveptr) {
 	struct parse_elt out = { 0 };
 	errno = 0;
 	uint16_t* i = malloc(sizeof(*i));
-	char* s = strtok_r(NULL, " ", saveptr);
+	char* s = strtoknul_r(NULL, " ", saveptr);
 	*i = htons(strtol(s, NULL, 0));
 	if (errno) {
 		perror("strtol");
@@ -52,7 +59,7 @@ static struct parse_elt parse_U32(char** saveptr) {
 	struct parse_elt out = { 0 };
 	errno = 0;
 	uint32_t* i = malloc(sizeof(*i));
-	char* s = strtok_r(NULL, " ", saveptr);
+	char* s = strtoknul_r(NULL, " ", saveptr);
 	*i = htonl(strtol(s, NULL, 0));
 	if (errno) {
 		perror("strtol");
@@ -69,9 +76,7 @@ static struct parse_elt parse_IPV4(char** saveptr) {
 	out.sze = 4;
 	out.data = malloc(out.sze);
 
-	char* s = strtok_r(NULL, " ", saveptr);
-	if (!s)
-		s = "";
+	char* s = strtoknul_r(NULL, " ", saveptr);
 	if (inet_pton(AF_INET, s, out.data) != 1) {
 		log(ERR, "inet_pton failed (ipv4) \"%s\"\n", s);
 		free(out.data);
@@ -86,9 +91,7 @@ static struct parse_elt parse_IPV6(char** saveptr) {
 	out.sze = 16;
 	out.data = malloc(out.sze);
 
-	char* s = strtok_r(NULL, " ", saveptr);
-	if (!s)
-		s = "";
+	char* s = strtoknul_r(NULL, " ", saveptr);
 	if (inet_pton(AF_INET6, s, out.data) != 1) {
 		log(ERR, "inet_pton failed (ipv4)\n");
 		free(out.data);
@@ -101,9 +104,7 @@ static struct parse_elt parse_IPV6(char** saveptr) {
 static struct parse_elt parse_TXT(char** saveptr) {
 	struct parse_elt out = { 0 };
 
-	char* s = strtok_r(NULL, "", saveptr);
-	if (!s)
-		s = "";
+	char* s = strtoknul_r(NULL, "", saveptr);
 	size_t sze = strlen(s);
 	if (sze > 255) {
 		log(ERR, "TXT: string to long\n");
@@ -121,9 +122,7 @@ static struct parse_elt parse_TXT(char** saveptr) {
 static struct parse_elt parse_DOMAIN(char** saveptr) {
 	struct parse_elt out = { 0 };
 
-	char* s = strtok_r(NULL, " ", saveptr);
-	if (s == NULL)
-		s = "";
+	char* s = strtoknul_r(NULL, " ", saveptr);
 	size_t len = strlen(s);
 	if (len > 255) {
 		log(ERR, "Domain too long\n");
@@ -131,9 +130,7 @@ static struct parse_elt parse_DOMAIN(char** saveptr) {
 	}
 	out.data = malloc(len + 2);
 	char* saveptr2 = NULL;
-	s = strtok_r(s, ".", &saveptr2);
-	if (!s)
-		s = "";
+	s = strtoknul_r(s, ".", &saveptr2);
 	if (strlen(s) == 0)
 		len--;
 	char* cur = out.data;
@@ -218,7 +215,7 @@ static int parse_line(char* str, struct entry* e) {
 	char* saveptr = NULL;
 	char* s;
 
-	s = strtok_r(str, " ", &saveptr);
+	s = strtoknul_r(str, " ", &saveptr);
 
 	e->type = -1;
 #define SET_TYPE(X) do { if (!strcasecmp(#X, s)) e->type = type_##X; } while (0)
@@ -358,7 +355,6 @@ int backend_init(int argc, char** argv) {
 	int ret = load_file(file);
 	fclose(file);
 
-	log(INFO, "Initialized\n");
 	return ret;
 }
 
