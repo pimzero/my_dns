@@ -176,11 +176,13 @@ static int handle_msg(struct dns_req* rq, size_t sze, send_fn cb, void* data) {
 	};
 
 	if (sze < sizeof(*rq)) {
+		errno = E2BIG;
 		LOG(WARN, "Packet too small for struct dns_req\n");
 		return cb(NULL, data);
 	}
 
 	if (rq->op >= arrsze(opcode_handler) || !opcode_handler[rq->op]) {
+		errno = EINVAL;
 		LOG(INFO, "unknown opcode \"%d\"\n", rq->op);
 		return -1;
 	}
