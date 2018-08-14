@@ -133,10 +133,10 @@ static struct parse_elt parse_DOMAIN(char** saveptr) {
 	s = strtoknul_r(s, ".", &saveptr2);
 	if (strlen(s) == 0)
 		len--;
-	char* cur = out.data;
+	uint8_t* cur = out.data;
 	do {
 		*cur = strlen(s);
-		strcpy(cur + 1, s);
+		strcpy((char*)cur + 1, s);
 		cur += *cur + 1;
 		*cur = 0;
 	} while ((s = strtok_r(NULL, ".", &saveptr2)));
