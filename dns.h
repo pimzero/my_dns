@@ -96,9 +96,8 @@ enum log_level {
 	LOG_WARN = 1,
 	LOG_INFO = 2,
 };
-extern enum log_level log_level;
 
-#define LOG(Level, ...) (log_level>=(LOG_##Level)?fprintf(stderr,__VA_ARGS__):0)
+#define LOG(Level, ...) ((void)(LOG_LEVEL>=(LOG_##Level)&&fprintf(stderr,__VA_ARGS__)))
 
 #ifdef USE_SECCOMP
 int backend_seccomp_rule(scmp_filter_ctx* ctx);

@@ -23,11 +23,7 @@
 #define chk_warn(X, MSG) do { if ((X)) { perror(MSG); } } while (0)
 #define arrsze(X) (sizeof(X) / sizeof(*(X)))
 
-#define BACK(Msg) ((Msg)->msg_iov[(Msg)->msg_iovlen++])
-
 #define __weak __attribute__((weak))
-
-enum log_level log_level = LOG_INFO;
 
 int __weak backend_init(int argc, char** argv) {
 	(void)argc;
@@ -157,6 +153,7 @@ teardown:
 		.msg_iov = iov,
 		.msg_iovlen = 0,
 	};
+#define BACK(Msg) ((Msg)->msg_iov[(Msg)->msg_iovlen++])
 	BACK(&msg) = IOV(rq, sze);
 	msg.msg_iov[0].iov_len = sze;
 	for (size_t i = 0; i < iogroup.iovlen; i++) {
