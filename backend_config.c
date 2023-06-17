@@ -397,7 +397,7 @@ int find_record(enum type type, void* buf, size_t sze, struct iovecgroup* io) {
 	for (size_t i = 0; i < entries.count; i++) {
 		if (entries.table[i].type == type &&
 		    !strncasecmp(entries.table[i].name, buf, sze)) {
-			log(INFO, "Found: \"%.*s\" (%d)\n", (int)sze,
+			log(WARN, "Found: \"%.*s\" (%d)\n", (int)sze,
 			    (char*)buf, type);
 			io->iovlen = entries.table[i].count;
 			io->iovec = entries.table[i].iovec;
@@ -405,7 +405,7 @@ int find_record(enum type type, void* buf, size_t sze, struct iovecgroup* io) {
 		}
 	}
 	if (!io->iovlen) {
-		log(INFO, "Not found: \"%.*s\" (%d)\n", (int)sze, (char*)buf,
+		log(WARN, "Not found: \"%.*s\" (%d)\n", (int)sze, (char*)buf,
 		    type);
 		return rcode_nxdomain;
 	}
