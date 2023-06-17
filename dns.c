@@ -25,6 +25,8 @@
 
 #define __weak __attribute__((weak))
 
+enum log_level LOG_DYNAMIC = LOG_WARN;
+
 int __weak backend_init(int argc, char** argv) {
 	(void)argc;
 	(void)argv;
@@ -344,6 +346,23 @@ static void sighup_handler(int s) {
 	LOG(INFO, "reloading config: finish\n");
 }
 
+static void set_verbosity(void) {
+	const char* verbosity = getenv("DNS_VERBOSITY");
+	if (!verbosity)
+		return;
+
+	if (!strcasecmp(verbosity, "INFO")) {
+		LOG_DYNAMIC = LOG_INFO;
+	} else if (!strcasecmp(verbosity, "WARN")) {
+		LOG_DYNAMIC = LOG_WARN;
+	} else if (!strcasecmp(verbosity, "ERR")) {
+		LOG_DYNAMIC = LOG_ERR;
+	} else {
+		LOG(ERR, "Unsupported verbosity \"%s\"\n", verbosity);
+		exit(1);
+	}
+}
+
 int main(int argc, char** argv) {
 	int dry_run = 0;
 	if (argc >= 2 && !strcmp(argv[1], "--dry-run")) {
@@ -351,6 +370,9 @@ int main(int argc, char** argv) {
 		argc--;
 		argv++;
 	}
+
+	set_verbosity();
+
 	if (backend_init(argc, argv) < 0)
 		return 1;
 

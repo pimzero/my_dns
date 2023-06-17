@@ -96,6 +96,7 @@ enum log_level {
 	LOG_WARN = 1,
 	LOG_INFO = 2,
 };
+extern enum log_level LOG_DYNAMIC;
 
 #define LOG(Level, ...) ((void)(LOG_LEVEL>=(LOG_##Level)&&fprintf(stderr,__VA_ARGS__)))
 
