@@ -141,10 +141,7 @@ teardown:
 	if (!rq->rcode && iogroup.iovlen >= 256)
 		rq->rcode = rcode_servfail;
 
-	if (!iogroup.iovlen)
-		rq->rcode = rcode_nxdomain;
-
-	if (rq->rcode) {
+	if (rq->rcode != rcode_ok) {
 		rq->ancount = ntohs(0);
 		rq->arcount = ntohs(0);
 

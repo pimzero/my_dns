@@ -394,17 +394,23 @@ int backend_seccomp_rule(scmp_filter_ctx* ctx) {
 
 int find_record(enum type type, void* buf, size_t sze, struct iovecgroup* io) {
 	io->iovlen = 0;
+	int found = 0;
 	for (size_t i = 0; i < entries.count; i++) {
-		if (entries.table[i].type == type &&
-		    !strncasecmp(entries.table[i].name, buf, sze)) {
-			log(WARN, "Found: \"%.*s\" (%d)\n", (int)sze,
-			    (char*)buf, type);
-			io->iovlen = entries.table[i].count;
-			io->iovec = entries.table[i].iovec;
-			break;
+		if (!strncasecmp(entries.table[i].name, buf, sze)) {
+			/* If we have the domain but not the requested type, do
+			 * not return nxdomain
+			 */
+			found = 1;
+			if (entries.table[i].type == type) {
+				log(WARN, "Found: \"%.*s\" (%d)\n", (int)sze,
+						(char*)buf, type);
+				io->iovlen = entries.table[i].count;
+				io->iovec = entries.table[i].iovec;
+				break;
+			}
 		}
 	}
-	if (!io->iovlen) {
+	if (!found && !io->iovlen) {
 		log(WARN, "Not found: \"%.*s\" (%d)\n", (int)sze, (char*)buf,
 		    type);
 		return rcode_nxdomain;
